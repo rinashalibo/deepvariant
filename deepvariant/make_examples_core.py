@@ -129,7 +129,7 @@ END_OF_REGION = -1
 END_OF_PARTITION = -2
 
 # Maximum length of partition in bases. It is limited by available memory.
-# TODO: For better flexibility it may be benefitial to expose it as a
+# TODO: For better flexibility it may be beneficial to expose it as a
 # flag.
 MAX_PARTITION_LEN = 1000000
 
@@ -335,6 +335,23 @@ def resolve_sam_aux_fields(
     aux_fields.add('OQ')
 
   # Add fields required for channels.
+  if (
+      'homopolymer_insertion_quality' in provided_channels
+      or 'homopolymer_deletion_quality' in provided_channels
+  ):
+    logging.info(
+        'Parsing tp AUX tag because homopolymer_insertion_quality or '
+        'homopolymer_deletion_quality channel is present.'
+    )
+    aux_fields.add('tp')
+
+  if 'inter_homopolymer_insertion_quality' in provided_channels:
+    logging.info(
+        'Parsing t0 AUX tag because inter_homopolymer_insertion_quality '
+        'channel is present.'
+    )
+    aux_fields.add('t0')
+
   for base_mod_channel in ['base_methylation', 'base_6ma']:
     if base_mod_channel in provided_channels:
       logging.info(
@@ -508,7 +525,7 @@ def write_make_examples_run_info(run_info_proto, path):
         '# proto-file: learning/genomics/deepvariant/protos/deepvariant.proto\n'
         '# proto-message: MakeExamplesRunInfo\n'
     )
-    writer.write(text_format.MessageToString(run_info_proto, float_format=''))
+    writer.write(text_format.MessageToString(run_info_proto))
 
 
 # ---------------------------------------------------------------------------
@@ -1056,8 +1073,8 @@ def reservoir_sample_reads(
     k: The number of elements to sample.
     region: The region we're sampling from. This can be used to determine how
       many bases are covered in the region.
-    max_bases_to_cover: If this maximum number of bases is reached, the
-      samplling will stop.
+    max_bases_to_cover: If this maximum number of bases is reached, the sampling
+      will stop.
     random_generator: A random number generator or None.
 
   Returns:
@@ -1727,7 +1744,7 @@ class RegionProcessor:
     ):
       logging.info(
           'For --variant_caller=vcf_candidate_importer, we '
-          'default the labeler_algorithm to positional_labler.'
+          'default the labeler_algorithm to positional_labeler.'
       )
       return positional_labeler.PositionalVariantLabeler(
           truth_vcf_reader=truth_vcf_reader, confident_regions=confident_regions
@@ -2754,7 +2771,7 @@ class RegionProcessor:
       A 3-tuple of (candidates, gvcfs, read_phases).
       The first value, candidates, is a dict keyed by sample role, where each
       item is a list of deepvariant_pb2.DeepVariantCalls objects, in
-      coordidate order.
+      coordinate order.
       The second value, gvcfs, is a dict keyed by sample role, where
       each item is a list of nucleus.genomics.v1.Variant protos containing gVCF
       information for all reference sites, if gvcf generation is enabled,
@@ -2775,6 +2792,8 @@ class RegionProcessor:
       # we need to return the gVCF records calculated by the caller below.
       return {}, {}, {}, 0
 
+    effective_region = padded_region or region
+
     allele_counters = {}
     candidate_positions = []
     if self.options.allele_counter_options.track_ref_reads:
@@ -2782,14 +2801,9 @@ class RegionProcessor:
       for sample in self.samples:
         if sample.options.reads_filenames:
           # Calculate potential candidate positions from allele counts
-          if padded_region is not None:
-            sample.allele_counter = self._make_allele_counter_for_region(
-                padded_region, []
-            )
-          else:
-            sample.allele_counter = self._make_allele_counter_for_region(
-                region, []
-            )
+          sample.allele_counter = self._make_allele_counter_for_region(
+              effective_region, []
+          )
 
           for read in sample.reads:
             sample.allele_counter.add(read, sample.options.name)
@@ -2825,27 +2839,15 @@ class RegionProcessor:
           )
           sample.reads = sample.in_memory_sam_reader.query(region)
 
-          if padded_region is not None:
-            sample.allele_counter = (
-                self._make_allele_counter_for_read_overlap_region(
-                    padded_region, full_range, candidate_positions
-                )
-            )
-          else:
-            sample.allele_counter = (
-                self._make_allele_counter_for_read_overlap_region(
-                    region, full_range, candidate_positions
-                )
-            )
+          sample.allele_counter = (
+              self._make_allele_counter_for_read_overlap_region(
+                  effective_region, full_range, candidate_positions
+              )
+          )
         else:
-          if padded_region is not None:
-            sample.allele_counter = self._make_allele_counter_for_region(
-                padded_region, candidate_positions
-            )
-          else:
-            sample.allele_counter = self._make_allele_counter_for_region(
-                region, candidate_positions
-            )
+          sample.allele_counter = self._make_allele_counter_for_region(
+              effective_region, candidate_positions
+          )
 
         for read in sample.reads:
           if (
@@ -2920,12 +2922,9 @@ class RegionProcessor:
       snp_candidates = candidates[role][snp_candidate_idx]
 
       if self.options.phase_reads and not sample.options.skip_phasing:
-        if padded_region is not None:
-          reads_to_phase = list(
-              sample.in_memory_sam_reader.query(padded_region)
-          )
-        else:
-          reads_to_phase = list(sample.in_memory_sam_reader.query(region))
+        reads_to_phase = list(
+            sample.in_memory_sam_reader.query(effective_region)
+        )
 
         # We need to delete phasing tag here if phasing cannot be done for the
         # region we don't want to use the existing phasing if it exists in the
@@ -3274,12 +3273,9 @@ def processing_regions_from_options(
     ValueError: if the regions to call is empty.
 
   Returns:
-    A tuple of three values, (regions, sample_regions, calling_regions).
+    A tuple of two values, (regions, calling_regions).
     regions: a list of nucleus.genomics.v1.Range protos of the regions we should
     process.
-    sample_regions: a list of nucleus.genomics.v1.Range protos of the regions we
-    should sample on to calculate global information over the genome such as
-    mean coverage.
     calling_regions: a RangeSet containing the calling regions calculated from
     intersection of input regions, confident regions and regions to exclude.
   """
@@ -3744,7 +3740,7 @@ def get_model_example_info_json_path(
 
 
 def apply_flags_for_calling(flags_obj: flags.FlagValues):
-  """Read flags for calling from the example_info.json file and apply them to the flag values object.
+  """Read flags for calling from the model.example_info.json file and apply them to the flag values object.
 
   Flag values are resolved in the following order:
   1. Command Line: User-provided flags take the highest priority.
@@ -3752,6 +3748,9 @@ def apply_flags_for_calling(flags_obj: flags.FlagValues):
      file are applied next.
   3. Default Values: If a flag is not specified elsewhere,
      its default value is used.
+
+  This function will also check that the partition_size and
+  max_reads_per_partition flags are both set or not set at all.
 
   Args:
     flags_obj: The flag values object.
@@ -3815,3 +3814,12 @@ def apply_flags_for_calling(flags_obj: flags.FlagValues):
       continue
 
     flag.value = flags_map[flag_name]
+
+  if (
+      flags_obj['partition_size'].present
+      != flags_obj['max_reads_per_partition'].present
+  ):
+    raise ValueError(
+        'Both --partition_size and --max_reads_per_partition must be set '
+        'together, or not at all.'
+    )

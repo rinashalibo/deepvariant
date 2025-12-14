@@ -1,5 +1,5 @@
 /*
- * Copyright 2019 Google LLC.
+ * Copyright 2025 Google LLC.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -27,42 +27,34 @@
  * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
  * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGE.
- *
  */
 
-#include <memory>
-#include <string>
+#ifndef LEARNING_GENOMICS_DEEPVARIANT_CHANNELS_CHANNEL_UTILS_H_
+#define LEARNING_GENOMICS_DEEPVARIANT_CHANNELS_CHANNEL_UTILS_H_
 
-#include "third_party/nucleus/io/tfrecord_reader.h"
+#include <cstdint>
 
-#include "third_party/nucleus/protos/variants.pb.h"
-#include "third_party/nucleus/testing/test_utils.h"
+namespace learning {
+namespace genomics {
+namespace deepvariant {
+namespace channels {
+namespace internal {
 
-namespace nucleus {
+// The maximum value for a pixel in the pileup image.
+// TODO: Make this a constant in a shared place.
+constexpr float kMaxPixelValueAsFloat = 255.0;
 
-TEST(TFRecordReaderTest, Simple) {
-  std::unique_ptr<TFRecordReader> reader = TFRecordReader::New(
-      GetTestData("test_likelihoods.vcf.golden.tfrecord"), "");
-  ASSERT_NE(reader, nullptr);
+// The maximum value for a quality score.
+// TODO: Make this a constant in a shared place.
+constexpr float kMaxQScore = 93.0;
 
-  ASSERT_TRUE(reader->GetNext());
+// Converts a base quality score to a color value.
+std::uint8_t BaseQualityColor(int base_qual);
 
-  std::string s = reader->record();
+}  // namespace internal
+}  // namespace channels
+}  // namespace deepvariant
+}  // namespace genomics
+}  // namespace learning
 
-  nucleus::genomics::v1::Variant v;
-  v.ParseFromString(s);
-
-  ASSERT_EQ("Chr1", v.reference_name());
-
-  reader->Close();
-}
-
-
-TEST(TFRecordReaderTest, NotFound) {
-  std::unique_ptr<TFRecordReader> reader =
-      TFRecordReader::New(GetTestData("not_found.tfrecord"), "");
-  ASSERT_EQ(reader, nullptr);
-}
-
-}  // namespace nucleus
-
+#endif  // LEARNING_GENOMICS_DEEPVARIANT_CHANNELS_CHANNEL_UTILS_H_

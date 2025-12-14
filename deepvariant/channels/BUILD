@@ -1,4 +1,5 @@
 # load("@rules_cc//cc:cc_library.bzl", "cc_library")
+# load("@rules_cc//cc:cc_test.bzl", "cc_test")
 
 package(
     default_visibility = [
@@ -64,6 +65,12 @@ cc_library(
         "//third_party/nucleus/protos:variants_cc_pb2",
         "@com_google_absl//absl/log",
     ],
+)
+
+cc_library(
+    name = "channel_utils",
+    srcs = ["channel_utils.cc"],
+    hdrs = ["channel_utils.h"],
 )
 
 cc_library(
@@ -145,6 +152,21 @@ cc_library(
         "@com_google_absl//absl/strings",
         "@com_google_absl//absl/types:span",
         "@com_google_protobuf//:protobuf_lite",
+    ],
+)
+
+cc_test(
+    name = "read_supports_variant_fuzzy_channel_test",
+    srcs = ["read_supports_variant_fuzzy_channel_test.cc"],
+    deps = [
+        ":read_supports_variant_fuzzy_channel",
+        "//deepvariant/protos:deepvariant_cc_pb2",
+        "//third_party/nucleus/protos:reads_cc_pb2",
+        "//third_party/nucleus/protos:variants_cc_pb2",
+        "//third_party/nucleus/util:cpp_utils",
+        "@com_google_absl//absl/strings:string_view",
+        "@com_google_googletest//:gtest_main",
+        "@org_tensorflow//tensorflow/core:test",
     ],
 )
 
@@ -357,12 +379,99 @@ cc_library(
     deps = [
         ":channel",
         "//deepvariant/protos:deepvariant_cc_pb2",
-        "//third_party/nucleus/protos:cigar_cc_pb2",
-        "//third_party/nucleus/protos:position_cc_pb2",
         "//third_party/nucleus/protos:reads_cc_pb2",
-        "//third_party/nucleus/protos:struct_cc_pb2",
+    ],
+)
+
+cc_library(
+    name = "homopolymer_indel_quality_channel",
+    srcs = ["homopolymer_indel_quality_channel.cc"],
+    hdrs = ["homopolymer_indel_quality_channel.h"],
+    deps = [
+        ":channel",
+        ":channel_utils",
+        "//deepvariant/protos:deepvariant_cc_pb2",
+        "//third_party/nucleus/protos:reads_cc_pb2",
+        "@com_google_absl//absl/strings",
+    ],
+)
+
+cc_library(
+    name = "homopolymer_deletion_quality_channel",
+    srcs = ["homopolymer_deletion_quality_channel.cc"],
+    hdrs = ["homopolymer_deletion_quality_channel.h"],
+    deps = [
+        ":channel",
+        ":homopolymer_indel_quality_channel",
+        "//deepvariant/protos:deepvariant_cc_pb2",
+        "//third_party/nucleus/protos:reads_cc_pb2",
+    ],
+)
+
+cc_library(
+    name = "homopolymer_insertion_quality_channel",
+    srcs = ["homopolymer_insertion_quality_channel.cc"],
+    hdrs = ["homopolymer_insertion_quality_channel.h"],
+    deps = [
+        ":channel",
+        ":homopolymer_indel_quality_channel",
+        "//deepvariant/protos:deepvariant_cc_pb2",
+        "//third_party/nucleus/protos:reads_cc_pb2",
+    ],
+)
+
+cc_library(
+    name = "inter_homopolymer_insertion_quality_channel",
+    srcs = ["inter_homopolymer_insertion_quality_channel.cc"],
+    hdrs = ["inter_homopolymer_insertion_quality_channel.h"],
+    deps = [
+        ":channel",
+        ":channel_utils",
+        "//deepvariant/protos:deepvariant_cc_pb2",
+        "//third_party/nucleus/protos:reads_cc_pb2",
+        "@com_google_absl//absl/log",
+        "@com_google_absl//absl/strings",
+    ],
+)
+
+cc_test(
+    name = "homopolymer_insertion_quality_channel_test",
+    srcs = ["homopolymer_insertion_quality_channel_test.cc"],
+    deps = [
+        ":homopolymer_insertion_quality_channel",
+        "//deepvariant/protos:deepvariant_cc_pb2",
+        "//third_party/nucleus/protos:reads_cc_pb2",
         "//third_party/nucleus/protos:variants_cc_pb2",
-        "@com_google_absl//absl/log:check",
-        "@com_google_absl//absl/types:span",
+        "@com_google_absl//absl/strings:string_view",
+        "@com_google_googletest//:gtest_main",
+        "@org_tensorflow//tensorflow/core:test",
+    ],
+)
+
+cc_test(
+    name = "homopolymer_deletion_quality_channel_test",
+    srcs = ["homopolymer_deletion_quality_channel_test.cc"],
+    deps = [
+        ":homopolymer_deletion_quality_channel",
+        "//deepvariant/protos:deepvariant_cc_pb2",
+        "//third_party/nucleus/protos:reads_cc_pb2",
+        "//third_party/nucleus/protos:variants_cc_pb2",
+        "@com_google_absl//absl/strings:string_view",
+        "@com_google_googletest//:gtest_main",
+        "@org_tensorflow//tensorflow/core:test",
+    ],
+)
+
+cc_test(
+    name = "inter_homopolymer_insertion_quality_channel_test",
+    srcs = ["inter_homopolymer_insertion_quality_channel_test.cc"],
+    deps = [
+        ":inter_homopolymer_insertion_quality_channel",
+        "//deepvariant/protos:deepvariant_cc_pb2",
+        "//third_party/nucleus/protos:reads_cc_pb2",
+        "//third_party/nucleus/protos:variants_cc_pb2",
+        "@com_google_absl//absl/strings:string_view",
+        "@com_google_googletest//:gtest_main",
+        "@org_tensorflow//tensorflow/core:test",
     ],
 )

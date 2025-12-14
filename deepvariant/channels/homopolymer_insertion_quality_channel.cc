@@ -1,5 +1,5 @@
 /*
- * Copyright 2019 Google LLC.
+ * Copyright 2025 Google LLC.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -27,42 +27,48 @@
  * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
  * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGE.
- *
  */
 
-#include <memory>
+#include "deepvariant/channels/homopolymer_insertion_quality_channel.h"
+
 #include <string>
+#include <vector>
 
-#include "third_party/nucleus/io/tfrecord_reader.h"
+#include "deepvariant/channels/channel.h"
+#include "deepvariant/channels/homopolymer_indel_quality_channel.h"
+#include "deepvariant/protos/deepvariant.pb.h"
 
-#include "third_party/nucleus/protos/variants.pb.h"
-#include "third_party/nucleus/testing/test_utils.h"
+namespace learning {
+namespace genomics {
+namespace deepvariant {
 
-namespace nucleus {
+HomopolymerInsertionQualityChannel::HomopolymerInsertionQualityChannel(
+    int width, const PileupImageOptions& options)
+    : HomopolymerInDelQualityChannel(width, options) {}
 
-TEST(TFRecordReaderTest, Simple) {
-  std::unique_ptr<TFRecordReader> reader = TFRecordReader::New(
-      GetTestData("test_likelihoods.vcf.golden.tfrecord"), "");
-  ASSERT_NE(reader, nullptr);
-
-  ASSERT_TRUE(reader->GetNext());
-
-  std::string s = reader->record();
-
-  nucleus::genomics::v1::Variant v;
-  v.ParseFromString(s);
-
-  ASSERT_EQ("Chr1", v.reference_name());
-
-  reader->Close();
+void HomopolymerInsertionQualityChannel::FillReadBase(
+    std::vector<unsigned char>& data, int col, char read_base, char ref_base,
+    int base_quality, const Read& read, int read_index,
+    const DeepVariantCall& dv_call,
+    const std::vector<std::string>& alt_alleles) {
+  if (!homopolymer_insertion_quality_vector_.has_value()) {
+    homopolymer_insertion_quality_vector_ =
+        HomoPolymerInDelQuality(read, false);  // false = insertion
+  }
+  if (read_index >= 0 &&
+      read_index < homopolymer_insertion_quality_vector_->size()) {
+    data[col] = (*homopolymer_insertion_quality_vector_)[read_index];
+  } else {
+    data[col] = 0;
+  }
 }
 
-
-TEST(TFRecordReaderTest, NotFound) {
-  std::unique_ptr<TFRecordReader> reader =
-      TFRecordReader::New(GetTestData("not_found.tfrecord"), "");
-  ASSERT_EQ(reader, nullptr);
+void HomopolymerInsertionQualityChannel::FillRefBase(
+    std::vector<unsigned char>& ref_data, int col, char ref_base,
+    const std::string& ref_bases) {
+  ref_data.push_back(0);
 }
 
-}  // namespace nucleus
-
+}  // namespace deepvariant
+}  // namespace genomics
+}  // namespace learning

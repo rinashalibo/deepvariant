@@ -134,6 +134,9 @@ nucleus::StatusOr<std::vector<int>> DirectPhasing::PhaseReads(
         const Vertex& to_2 = edge_2.second.m_target;
         auto prev_score_it =
             scores_.find({edge_1.second.m_source, edge_2.second.m_source});
+        if (prev_score_it == scores_.end()) {
+          continue;
+        }
         Score score = CalculateScore(edge_1.second, edge_2.second);
         // If score cannot advance then phasing cannot be continued. We need to
         // have at least one combination that advances the score.
@@ -374,6 +377,11 @@ void DirectPhasing::AssignPhasesToVertices() {
         }
         i--;
         prev_score = max_score_it;
+        break;
+      }
+      if (max_score_it == next_max_score_it) {
+        LOG(WARNING) << "Loop detected at position " << positions_[i];
+        i--;
         break;
       }
       prev_score = max_score_it;

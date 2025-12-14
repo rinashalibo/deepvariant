@@ -1,5 +1,5 @@
 /*
- * Copyright 2019 Google LLC.
+ * Copyright 2025 Google LLC.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -27,42 +27,25 @@
  * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
  * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGE.
- *
  */
 
-#include <memory>
-#include <string>
+#include "deepvariant/channels/channel_utils.h"
 
-#include "third_party/nucleus/io/tfrecord_reader.h"
+#include <cstdint>
 
-#include "third_party/nucleus/protos/variants.pb.h"
-#include "third_party/nucleus/testing/test_utils.h"
+namespace learning {
+namespace genomics {
+namespace deepvariant {
+namespace channels {
+namespace internal {
 
-namespace nucleus {
-
-TEST(TFRecordReaderTest, Simple) {
-  std::unique_ptr<TFRecordReader> reader = TFRecordReader::New(
-      GetTestData("test_likelihoods.vcf.golden.tfrecord"), "");
-  ASSERT_NE(reader, nullptr);
-
-  ASSERT_TRUE(reader->GetNext());
-
-  std::string s = reader->record();
-
-  nucleus::genomics::v1::Variant v;
-  v.ParseFromString(s);
-
-  ASSERT_EQ("Chr1", v.reference_name());
-
-  reader->Close();
+std::uint8_t BaseQualityColor(int base_qual) {
+  return static_cast<std::uint8_t>(kMaxPixelValueAsFloat * base_qual /
+                                   kMaxQScore);
 }
 
-
-TEST(TFRecordReaderTest, NotFound) {
-  std::unique_ptr<TFRecordReader> reader =
-      TFRecordReader::New(GetTestData("not_found.tfrecord"), "");
-  ASSERT_EQ(reader, nullptr);
-}
-
-}  // namespace nucleus
-
+}  // namespace internal
+}  // namespace channels
+}  // namespace deepvariant
+}  // namespace genomics
+}  // namespace learning

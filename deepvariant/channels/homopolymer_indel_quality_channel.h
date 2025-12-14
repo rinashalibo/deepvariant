@@ -1,5 +1,5 @@
 /*
- * Copyright 2019 Google LLC.
+ * Copyright 2025 Google LLC.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -27,42 +27,47 @@
  * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
  * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGE.
- *
  */
 
-#include <memory>
+#ifndef LEARNING_GENOMICS_DEEPVARIANT_CHANNELS_HOMOPOLYMER_INDEL_QUALITY_CHANNEL_H_
+#define LEARNING_GENOMICS_DEEPVARIANT_CHANNELS_HOMOPOLYMER_INDEL_QUALITY_CHANNEL_H_
+
+#include <cstdint>
 #include <string>
+#include <vector>
 
-#include "third_party/nucleus/io/tfrecord_reader.h"
+#include "deepvariant/channels/channel.h"
+#include "deepvariant/protos/deepvariant.pb.h"
+#include "third_party/nucleus/protos/reads.pb.h"
 
-#include "third_party/nucleus/protos/variants.pb.h"
-#include "third_party/nucleus/testing/test_utils.h"
+namespace learning {
+namespace genomics {
+namespace deepvariant {
 
-namespace nucleus {
+using learning::genomics::deepvariant::DeepVariantCall;
+using nucleus::genomics::v1::Read;
 
-TEST(TFRecordReaderTest, Simple) {
-  std::unique_ptr<TFRecordReader> reader = TFRecordReader::New(
-      GetTestData("test_likelihoods.vcf.golden.tfrecord"), "");
-  ASSERT_NE(reader, nullptr);
+class HomopolymerInDelQualityChannel : public Channel {
+ public:
+  HomopolymerInDelQualityChannel(
+      int width,
+      const learning::genomics::deepvariant::PileupImageOptions& options);
 
-  ASSERT_TRUE(reader->GetNext());
+  // Public for testing
+  std::vector<std::uint8_t> HomoPolymerInDelQuality(const Read& read,
+                                                    bool is_deletion);
 
-  std::string s = reader->record();
+ protected:
+  // Helper functions for reading and processing tags from reads
+  std::vector<int8_t> GetTPValues(const Read& read);
+  std::vector<std::uint8_t> HomoPolymerWeighted(const Read& read);
 
-  nucleus::genomics::v1::Variant v;
-  v.ParseFromString(s);
+  static const constexpr int kMaxQScore = 93;
+  static const constexpr int kMaxHomoPolymerWeighted = 30;
+};
 
-  ASSERT_EQ("Chr1", v.reference_name());
+}  // namespace deepvariant
+}  // namespace genomics
+}  // namespace learning
 
-  reader->Close();
-}
-
-
-TEST(TFRecordReaderTest, NotFound) {
-  std::unique_ptr<TFRecordReader> reader =
-      TFRecordReader::New(GetTestData("not_found.tfrecord"), "");
-  ASSERT_EQ(reader, nullptr);
-}
-
-}  // namespace nucleus
-
+#endif  // LEARNING_GENOMICS_DEEPVARIANT_CHANNELS_HOMOPOLYMER_INDEL_QUALITY_CHANNEL_H_
