@@ -48,8 +48,12 @@ constexpr float kMaxPixelValueAsFloat = 255.0;
 // TODO: Make this a constant in a shared place.
 constexpr float kMaxQScore = 93.0;
 
-// Converts a base quality score to a color value.
+// Converts a base quality score to a color value using kMaxQScore (93).
 std::uint8_t BaseQualityColor(int base_qual);
+
+// Converts a quality score to a color value with a custom max quality.
+// Used for homopolymer quality scaling where max_quality is typically 40.
+std::uint8_t BaseQualityColor(int base_qual, int max_quality);
 
 }  // namespace internal
 }  // namespace channels

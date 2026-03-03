@@ -31,6 +31,7 @@
 
 #include "deepvariant/channels/channel_utils.h"
 
+#include <algorithm>
 #include <cstdint>
 
 namespace learning {
@@ -42,6 +43,13 @@ namespace internal {
 std::uint8_t BaseQualityColor(int base_qual) {
   return static_cast<std::uint8_t>(kMaxPixelValueAsFloat * base_qual /
                                    kMaxQScore);
+}
+
+std::uint8_t BaseQualityColor(int base_qual, int max_quality) {
+  // Clamp to max_quality
+  int capped_qual = std::min(base_qual, max_quality);
+  return static_cast<std::uint8_t>(kMaxPixelValueAsFloat * capped_qual /
+                                   max_quality);
 }
 
 }  // namespace internal

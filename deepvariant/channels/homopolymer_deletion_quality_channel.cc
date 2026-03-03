@@ -37,6 +37,7 @@
 #include "deepvariant/channels/channel.h"
 #include "deepvariant/channels/homopolymer_indel_quality_channel.h"
 #include "deepvariant/protos/deepvariant.pb.h"
+#include "absl/log/log.h"
 
 namespace learning {
 namespace genomics {
@@ -55,11 +56,22 @@ void HomopolymerDeletionQualityChannel::FillReadBase(
     homopolymer_deletion_quality_vector_ =
         HomoPolymerInDelQuality(read, true);  // true = deletion
   }
-  if (read_index >= 0 &&
-      read_index < homopolymer_deletion_quality_vector_->size()) {
+  
+  bool is_valid_index = (read_index >= 0 && 
+                        read_index < homopolymer_deletion_quality_vector_->size());
+  if (is_valid_index) {
     data[col] = (*homopolymer_deletion_quality_vector_)[read_index];
+    LOG(WARNING) << "[HMER_DEL_QUALITY] read=" << read.fragment_name()
+                << " | read_index=" << read_index 
+                << " | col=" << col 
+                << " | value=" << static_cast<int>(data[col])
+                << " | vector_size=" << homopolymer_deletion_quality_vector_->size();
   } else {
     data[col] = 0;
+    LOG(WARNING) << "[HMER_DEL_QUALITY] OUT_OF_BOUNDS! read=" << read.fragment_name()
+                << " | read_index=" << read_index 
+                << " | col=" << col 
+                << " | vector_size=" << homopolymer_deletion_quality_vector_->size();
   }
 }
 

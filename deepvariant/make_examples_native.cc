@@ -803,6 +803,22 @@ std::vector<const Read*> InMemoryReader::Query(const Range& range) const {
   std::vector<const Read*> out;
   for (auto& read : reads_cache_) {
     if (nucleus::ReadOverlapsRegion(*read.p_, range)) {
+      // DEBUG: Print read information when loading from CRAM
+      LOG(INFO) << "=== CRAM Read Loaded ===" 
+                << " | Name: " << read.p_->fragment_name()
+                << " | Region: " << range.reference_name() << ":" 
+                << range.start() << "-" << range.end()
+                << " | Aligned_seq_len: " << read.p_->aligned_sequence().size()
+                << " | Qual_len: " << read.p_->aligned_quality().size();
+      // Print quality scores
+      std::string qual_scores;
+      for (size_t i = 0; i < read.p_->aligned_quality().size(); ++i) {
+        qual_scores += std::to_string(static_cast<int>(read.p_->aligned_quality()[i]));
+        if (i < read.p_->aligned_quality().size() - 1) {
+          qual_scores += ",";
+        }
+      }
+      LOG(INFO) << "Quality_scores: [" << qual_scores << "]";
       out.emplace_back(read.p_);
     }
   }

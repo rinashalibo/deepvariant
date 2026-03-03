@@ -41,6 +41,7 @@
 #include "deepvariant/channels/channel.h"
 #include "deepvariant/channels/channel_utils.h"
 #include "deepvariant/protos/deepvariant.pb.h"
+#include "absl/log/log.h"
 #include "absl/strings/string_view.h"
 #include "third_party/nucleus/protos/reads.pb.h"
 
@@ -72,19 +73,51 @@ HomopolymerInDelQualityChannel::HomopolymerInDelQualityChannel(
 std::vector<int8_t> HomopolymerInDelQualityChannel::GetTPValues(
     const Read& read) {
   std::vector<int8_t> int_tps(read.aligned_sequence().size());
+  bool log_this_read = (read.fragment_name().find("2749846422") != std::string::npos);
+  
+  if (log_this_read) {
+    LOG(WARNING) << "[GET_TP_VALUES] START | read=" << read.fragment_name()
+               << " | has_tp_tag=" << read.info().contains("tp")
+               << " | seq_size=" << read.aligned_sequence().size();
+  }
+  
   if (!read.info().contains("tp")) {
     // Return a vector of zeros if tp tag is not present.
+    if (log_this_read) {
+      LOG(WARNING) << "[GET_TP_VALUES] NO_TP_TAG | read=" << read.fragment_name();
+    }
     return int_tps;
   }
   const auto& tps = read.info().at("tp").values();
 
+  if (log_this_read) {
+    LOG(WARNING) << "[GET_TP_VALUES] TP_TAG_FOUND | read=" << read.fragment_name()
+               << " | tps.empty()=" << tps.empty()
+               << " | tps.size()=" << tps.size()
+               << " | expected_size=" << int_tps.size();
+  }
+
   if (tps.empty()) {
+    if (log_this_read) {
+      LOG(WARNING) << "[GET_TP_VALUES] EMPTY_TP_VALUES | read=" << read.fragment_name();
+    }
     return int_tps;
   }
 
   for (int i = 0; i < tps.size() && i < int_tps.size(); i++) {
     int_tps[i] = tps[i].int_value();
+    if (log_this_read && i < 20) {  // Log first 20 values only
+      LOG(WARNING) << "[GET_TP_VALUES] VALUE | read=" << read.fragment_name()
+                 << " | index=" << i
+                 << " | tp_value=" << static_cast<int>(int_tps[i]);
+    }
   }
+  
+  if (log_this_read) {
+    LOG(WARNING) << "[GET_TP_VALUES] COMPLETE | read=" << read.fragment_name()
+               << " | populated_count=" << (tps.size() < int_tps.size() ? tps.size() : int_tps.size());
+  }
+  
   return int_tps;
 }
 
@@ -135,14 +168,47 @@ HomopolymerInDelQualityChannel::HomoPolymerInDelQuality(const Read& read,
   std::vector<std::uint8_t> hmer_directed_qualities(
       read.aligned_sequence().size(),
       channels::internal::BaseQualityColor(kMaxQScore));
+  
+  bool log_this_read = (read.fragment_name().find("2749846422") != std::string::npos);
+  if (log_this_read) {
+    LOG(WARNING) << "[HMER_INDEL_QUALITY] START | read=" << read.fragment_name() 
+             << " | is_deletion=" << is_deletion 
+             << " | seq_size=" << read.aligned_sequence().size()
+             << " | vector_size=" << hmer_directed_qualities.size()
+             << " | kMaxQScore=" << kMaxQScore;
+  }
 
   std::string seq(read.aligned_sequence());
   auto hmer_lengths = HomoPolymerWeighted(read);
   auto tps = GetTPValues(read);
 
+  if (log_this_read) {
+    LOG(WARNING) << "[HMER_INDEL_QUALITY] TP_TAG_CHECK | read=" << read.fragment_name()
+             << " | tps.empty()=" << tps.empty()
+             << " | tps.size()=" << tps.size()
+             << " | seq.size()=" << seq.size()
+             << " | tps=";
+    for (size_t k = 0; k < tps.size() && k < 20; k++) {
+      LOG(WARNING) << "tp[" << k << "]="  << static_cast<int>(tps[k]) << " ";
+    }
+  }
+
   // If tp tag is not present, return default quality values
   if (tps.empty() || tps.size() != seq.size()) {
+    if (log_this_read) {
+      LOG(WARNING) << "[HMER_INDEL_QUALITY] RETURNING_DEFAULT | read=" << read.fragment_name()
+                 << " | reason=no_tp_tag";
+    }
     return hmer_directed_qualities;
+  }
+
+  if (log_this_read) {
+    LOG(WARNING) << "[HMER_INDEL_QUALITY] READ_QUALITIES | read=" << read.fragment_name()
+               << " | aligned_quality_size=" << read.aligned_quality().size()
+               << " | aligned_quality_values=";
+    for (size_t k = 0; k < read.aligned_quality().size() && k < 20; k++) {
+      LOG(WARNING) << "q[" << k << "]="  << static_cast<int>(read.aligned_quality()[k]) << " ";
+    }
   }
 
   int i = 0;
@@ -150,16 +216,44 @@ HomopolymerInDelQualityChannel::HomoPolymerInDelQuality(const Read& read,
     int hmer_length = hmer_lengths[i];
     float hmer_directed_error_prob = 0;
 
+    if (log_this_read) {
+      LOG(WARNING) << "[HMER_INDEL_QUALITY] HMER_GROUP | read=" << read.fragment_name()
+                 << " | hmer_start=" << i
+                 << " | hmer_length=" << hmer_length
+                 << " | is_deletion=" << is_deletion;
+    }
+
     // Iterate quality encodings for hmer [i], and sum them up to upward
     // direction or downward direction quality PHRED scores.
     for (int j = 0; j < hmer_length; j++) {
-      if (tps[i + j] == 0) {
+      int pos = i + j;
+      std::uint8_t encoded_hmer_qual = read.aligned_quality()[pos];
+      int tp_value = tps[pos];
+      bool is_deletion_err = tp_value < 0;
+      
+      if (log_this_read) {
+        LOG(WARNING) << "[HMER_INDEL_QUALITY] BASE | read=" << read.fragment_name()
+                   << " | pos=" << pos
+                   << " | encoded_qual=" << static_cast<int>(encoded_hmer_qual)
+                   << " | tp=" << tp_value
+                   << " | is_deletion_err=" << is_deletion_err
+                   << " | matches_direction=" << (is_deletion_err == is_deletion);
+      }
+
+      if (tp_value == 0) {
+        if (log_this_read) {
+          LOG(WARNING) << "[HMER_INDEL_QUALITY] SKIPPING_ZERO_TP | pos=" << pos;
+        }
         continue;
       }
-      bool is_deletion_err = tps[i + j] < 0;
+      
       if (is_deletion_err == is_deletion) {
-        std::uint8_t encoded_hmer_qual = read.aligned_quality()[i + j];
         float error_prob = std::pow(10, (encoded_hmer_qual / -10.0));
+        if (log_this_read) {
+          LOG(WARNING) << "[HMER_INDEL_QUALITY] ADDING_ERROR_PROB | pos=" << pos
+                     << " | encoded_qual=" << static_cast<int>(encoded_hmer_qual)
+                     << " | error_prob_component=" << error_prob;
+        }
         hmer_directed_error_prob += error_prob;
       }
     }
@@ -168,17 +262,46 @@ HomopolymerInDelQualityChannel::HomoPolymerInDelQuality(const Read& read,
         hmer_directed_error_prob == 0
             ? kMaxQScore
             : static_cast<int>(-10 * std::log10(hmer_directed_error_prob));
+    
+    if (log_this_read) {
+      LOG(WARNING) << "[HMER_INDEL_QUALITY] FINAL_QUALITY | read=" << read.fragment_name()
+                 << " | hmer_start=" << i
+                 << " | hmer_length=" << hmer_length
+                 << " | total_error_prob=" << hmer_directed_error_prob
+                 << " | computed_quality=" << hmer_directed_quality
+                 << " | color_value=" << static_cast<int>(channels::internal::BaseQualityColor(hmer_directed_quality, 40));
+    }
+
     // Clamp to valid range
     if (hmer_directed_quality > kMaxQScore) {
+      if (log_this_read) {
+        LOG(WARNING) << "[HMER_INDEL_QUALITY] CLAMPING | original=" << hmer_directed_quality
+                   << " | to_max=" << kMaxQScore;
+      }
       hmer_directed_quality = kMaxQScore;
     }
 
     for (int j = 0; j < hmer_length; j++) {
-      hmer_directed_qualities[i + j] =
-          channels::internal::BaseQualityColor(hmer_directed_quality);
+      int pos = i + j;
+      // Use max_quality of 40 for homopolymer quality color scaling (Ultima standard)
+      std::uint8_t color_value = channels::internal::BaseQualityColor(hmer_directed_quality, 40);
+      hmer_directed_qualities[pos] = color_value;
+      if (log_this_read) {
+        LOG(WARNING) << "[HMER_INDEL_QUALITY_FULL] read=" << read.fragment_name()
+                   << " | pos=" << pos
+                   << " | quality=" << hmer_directed_quality
+                   << " | color_value=" << static_cast<int>(color_value);
+      }
     }
     i += hmer_length;
   }
+  
+  if (log_this_read) {
+    LOG(WARNING) << "[HMER_INDEL_QUALITY] COMPLETE | read=" << read.fragment_name()
+               << " | is_deletion=" << is_deletion
+               << " | final_vector_size=" << hmer_directed_qualities.size();
+  }
+  
   return hmer_directed_qualities;
 }
 

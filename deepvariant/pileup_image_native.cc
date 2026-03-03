@@ -343,6 +343,19 @@ PileupImageEncoderNative::BuildPileupForOneSample(
     sampled_indices = DownsampleReadIndices(reads, max_reads, gen);
   }
 
+  // DEBUG: Log sampled reads
+  LOG(WARNING) << "=== PILEUP START | Variant: " << dv_call.variant().reference_name() 
+            << ":" << dv_call.variant().start() 
+            << " | Total reads: " << reads.size() 
+            << " | Sampled: " << sampled_indices.size() << " ====";
+  for (int i = 0; i < std::min(static_cast<int>(sampled_indices.size()), 10); ++i) {
+    const Read& read = *reads[sampled_indices[i]];
+    LOG(WARNING) << "  Sampled[" << i << "]: " << read.fragment_name() 
+              << "/" << read.read_number() 
+              << " | mapq=" << read.alignment().mapping_quality() 
+              << " | pos=" << read.alignment().position().position();
+  }
+
   // Precompute read-to-allele_group mapping if sorting by alt allele support.
   absl::flat_hash_map<std::string, int> read_name_to_allele_group_map;
   int num_alt_alleles_in_variant = 0;
@@ -369,11 +382,25 @@ PileupImageEncoderNative::BuildPileupForOneSample(
       break;
     }
     const Read& read = *reads[index];
+    bool log_this_read = (read.fragment_name().find("2749846422") != std::string::npos);
+    if (log_this_read) {
+      LOG(WARNING) << "=== ENCODE_READ START | " << read.fragment_name() 
+                << "/" << read.read_number() 
+                << " | seq_len=" << read.aligned_sequence().length() 
+                << " | qual_len=" << read.aligned_quality().length() 
+                << " | pos=" << read.alignment().position().position() << " ===" ;
+    }
     std::unique_ptr<ImageRow> image_row =
         EncodeRead(dv_call, ref_bases, read, image_start_pos, alt_alleles,
                   channels_enum_to_blank);
     if (image_row == nullptr) {
+      if (log_this_read) {
+        LOG(WARNING) << "  -> EncodeRead returned nullptr (likely low quality at call site)";
+      }
       continue;
+    }
+    if (log_this_read) {
+      LOG(WARNING) << "  -> EncodeRead succeeded with " << image_row->channel_data.size() << " channels";
     }
 
     int hap_idx = GetHapIndex(read);
@@ -443,6 +470,18 @@ PileupImageEncoderNative::BuildPileupForOneSample(
     }
   }
 
+  LOG(WARNING) << "=== PILEUP END | Final assembly: " << rows.size() << " rows total"
+            << " (ref_band=" << options_.reference_band_height() 
+            << ", reads=" << pileup_of_reads.size()
+            << ", empty=" << empty_rows << ")"
+            << " | Width=" << ref_bases.size();
+  for (int i = 0; i < std::min(5, static_cast<int>(pileup_of_reads.size())); ++i) {
+    const auto& [hap_idx, allele_group, pos, read_ptr, row_ptr] = pileup_of_reads[i];
+    LOG(WARNING) << "  Final[" << i << "]: " << read_ptr->fragment_name()
+              << " | hap=" << hap_idx << " | allele_grp=" << allele_group 
+              << " | pos=" << pos;
+  }
+
   return rows;
 }
 
@@ -485,8 +524,18 @@ std::unique_ptr<ImageRow> PileupImageEncoderNative::EncodeRead(
   const int mapping_quality = read.alignment().mapping_quality();
   const int min_mapping_quality =
       options_.read_requirements().min_mapping_quality();
+  
+  LOG(WARNING) << "ENCODE_READ_DETAIL: read=" << read.fragment_name()
+            << " | mapq=" << mapping_quality 
+            << " | min_mapq=" << min_mapping_quality
+            << " | image_start_pos=" << image_start_pos
+            << " | ref_bases_size=" << ref_bases.size()
+            << " | num_channels=" << num_channels;
+  LOG(WARNING) << "  ref_bases: " << std::string(ref_bases);
+  
   if (mapping_quality < min_mapping_quality) {
     // Bail early if this read's mapping quality is too low.
+    LOG(WARNING) << "  -> REJECTED: mapping quality too low";
     return nullptr;
   }
 
@@ -497,15 +546,18 @@ std::unique_ptr<ImageRow> PileupImageEncoderNative::EncodeRead(
   for (int i = 0; i < channel_enums_.size(); ++i) {
     img_row.channel_data[i] = std::vector<unsigned char>(ref_bases.size(), 0);
   }
+  LOG(WARNING) << "  Calling CalculateChannels with " << channel_enums_.size() << " channels";
   bool ok = channel_set.CalculateChannels(
       img_row.channel_data, channel_enums_, read, ref_bases, dv_call,
       alt_alleles, image_start_pos, channels_enum_to_blank);
   // Bail out if we found an issue while calculating channels
   // (a low-quality base at the call site, mapping quality is too low, etc)
   if (!ok) {
+    LOG(WARNING) << "  -> CalculateChannels returned false (low quality at call site)";
     return nullptr;
   }
 
+  LOG(WARNING) << "  -> SUCCESS: Encoded read with " << img_row.channel_data.size() << " channels";
   return std::make_unique<ImageRow>(img_row);
 }
 
