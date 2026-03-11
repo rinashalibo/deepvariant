@@ -36,6 +36,7 @@
 #include <cstdlib>
 #include <functional>
 #include <memory>
+#include <set>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -89,6 +90,46 @@ namespace learning {
 namespace genomics {
 namespace deepvariant {
 
+namespace {
+
+std::vector<int> ParseTraceChannelIndicesFromEnv() {
+  const char* env_value = std::getenv("DV_TRACE_CHANNEL_INDICES");
+  std::string value =
+      (env_value == nullptr || env_value[0] == '\0') ? "6,7,8" : env_value;
+  std::set<int> unique_indices;
+  std::stringstream ss(value);
+  std::string token;
+  while (std::getline(ss, token, ',')) {
+    if (token.empty()) {
+      continue;
+    }
+    try {
+      unique_indices.insert(std::stoi(token));
+    } catch (...) {
+    }
+  }
+  return std::vector<int>(unique_indices.begin(), unique_indices.end());
+}
+
+const std::vector<int>& TraceChannelIndices() {
+  static const std::vector<int> kTraceChannelIndices =
+      ParseTraceChannelIndicesFromEnv();
+  return kTraceChannelIndices;
+}
+
+bool ShouldTraceRead(const Read& read) {
+  const char* target_substr = std::getenv("DV_TRACE_READ_SUBSTR");
+  if (target_substr == nullptr || target_substr[0] == '\0') {
+    target_substr = std::getenv("DV_DEBUG_READ_SUBSTR");
+  }
+  if (target_substr == nullptr || target_substr[0] == '\0') {
+    return false;
+  }
+  return read.fragment_name().find(target_substr) != std::string::npos;
+}
+
+}  // namespace
+
 bool Channels::CalculateChannels(
     std::vector<std::vector<unsigned char>>& data,
     absl::Span<const DeepVariantChannelEnum> channel_enums, const Read& read,
@@ -99,10 +140,11 @@ bool Channels::CalculateChannels(
       << "Size of provided data vector does not match the number of channels "
          "specified";
 
-  // Check if this is the target read for logging
-  bool log_this_read = (read.fragment_name().find("2749846422") != std::string::npos);
+  const bool log_this_read = ShouldTraceRead(read);
+  const std::vector<int>& trace_channel_indices = TraceChannelIndices();
   if (log_this_read) {
-    LOG(WARNING) << ">> CalculateChannels START for Read: " << read.fragment_name();
+    LOG(WARNING) << "[CH_TRACE] start read=" << read.fragment_name() << "/"
+                 << read.read_number();
   }
 
   int maxEnumValue = getMaxEnumValue(channel_enums);
@@ -119,7 +161,8 @@ bool Channels::CalculateChannels(
     channel_objects[channel_enum] =
         Channels::ChannelEnumToObject(channel_enum, ref_bases.size(), options_);
     if (log_this_read) {
-      LOG(WARNING) << "  Initialized channel enum: " << channel_enum;
+      LOG(WARNING) << "[CH_TRACE] channel_index=" << channel_enum_to_index_[channel_enum]
+                   << " | channel_enum=" << channel_enum;
     }
   }
 
@@ -171,9 +214,14 @@ bool Channels::CalculateChannels(
           // call site.
           if (ref_i == dv_call.variant().start() &&
               base_quality < options_.read_requirements().min_base_quality()) {
-            if (log_this_read) {
-              LOG(WARNING) << "    >> LOW QUALITY AT CALL SITE - RETURNING FALSE";
-            }
+            LOG(WARNING) << "[READ_FILTER_REASON] read=" << read.fragment_name()
+                         << "/" << read.read_number()
+                         << " | reason=min_base_quality_at_callsite"
+                         << " | ref_pos=" << ref_i
+                         << " | read_index=" << read_i
+                         << " | base_quality=" << static_cast<int>(base_quality)
+                         << " | threshold="
+                         << options_.read_requirements().min_base_quality();
             return false;
           }
           char ref_base = ref_bases[col];
@@ -229,6 +277,27 @@ bool Channels::CalculateChannels(
           if (log_this_read && !channel_updates_str.empty()) {
             LOG(WARNING) << "    CHANNELS_UPDATED: " << channel_updates_str;
           }
+
+          if (log_this_read && !trace_channel_indices.empty()) {
+            std::stringstream channel_snapshot;
+            bool wrote_any = false;
+            for (int channel_index : trace_channel_indices) {
+              if (channel_index < 0 || channel_index >= data.size()) {
+                continue;
+              }
+              if (wrote_any) {
+                channel_snapshot << " | ";
+              }
+              channel_snapshot << "ch[" << channel_index << "]="
+                               << static_cast<int>(data[channel_index][col]);
+              wrote_any = true;
+            }
+            if (wrote_any) {
+              LOG(WARNING) << "[CH_TRACE] read=" << read.fragment_name() << "/"
+                           << read.read_number() << " | col=" << col << " | "
+                           << channel_snapshot.str();
+            }
+          }
         } else {
           if (log_this_read && read_base) {
             LOG(WARNING) << "    >> SKIPPED: out of range or no read_base";
@@ -244,7 +313,8 @@ bool Channels::CalculateChannels(
   bool result = CalculateBaseLevelData(read, action_per_cigar_unit);
   
   if (log_this_read) {
-    LOG(WARNING) << ">> CalculateChannels END for Read: " << read.fragment_name() << " (result=" << result << ")";
+    LOG(WARNING) << "[CH_TRACE] end read=" << read.fragment_name() << "/"
+                 << read.read_number() << " | result=" << result;
   }
   
   return result;

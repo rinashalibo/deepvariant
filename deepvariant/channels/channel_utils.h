@@ -48,6 +48,9 @@ constexpr float kMaxPixelValueAsFloat = 255.0;
 // TODO: Make this a constant in a shared place.
 constexpr float kMaxQScore = 93.0;
 
+// Quality channels should match haplotype image scaling (0-254).
+constexpr float kMaxQualityPixelValueAsFloat = 254.0;
+
 // Converts a base quality score to a color value using kMaxQScore (93).
 std::uint8_t BaseQualityColor(int base_qual);
 

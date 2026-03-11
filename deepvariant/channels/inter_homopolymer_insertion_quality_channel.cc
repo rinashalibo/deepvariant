@@ -31,6 +31,7 @@
 
 #include "deepvariant/channels/inter_homopolymer_insertion_quality_channel.h"
 
+#include <cstdlib>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -45,6 +46,18 @@ namespace learning {
 namespace genomics {
 namespace deepvariant {
 
+namespace {
+
+bool ShouldLogHmerRead(const Read& read) {
+  const char* target_substr = std::getenv("DV_DEBUG_READ_SUBSTR");
+  if (target_substr == nullptr || target_substr[0] == '\0') {
+    return false;
+  }
+  return read.fragment_name().find(target_substr) != std::string::npos;
+}
+
+}  // namespace
+
 InterHomopolymerInsertionQualityChannel::
     InterHomopolymerInsertionQualityChannel(int width,
                                             const PileupImageOptions& options)
@@ -55,14 +68,37 @@ void InterHomopolymerInsertionQualityChannel::FillReadBase(
     int base_quality, const Read& read, int read_index,
     const DeepVariantCall& dv_call,
     const std::vector<std::string>& alt_alleles) {
+  const bool log_this_read = ShouldLogHmerRead(read);
   if (!inter_homopolymer_insertion_quality_vector_.has_value()) {
     inter_homopolymer_insertion_quality_vector_ = GetT0QualityValues(read);
+    if (log_this_read) {
+      LOG(WARNING) << "[INTER_HMER_INS_QUALITY] COMPUTED_VECTOR read="
+                   << read.fragment_name() << "/" << read.read_number()
+                   << " | vector_size="
+                   << inter_homopolymer_insertion_quality_vector_->size()
+                   << " | seq_size=" << read.aligned_sequence().size();
+    }
   }
   if (read_index >= 0 &&
       read_index < inter_homopolymer_insertion_quality_vector_->size()) {
     data[col] = (*inter_homopolymer_insertion_quality_vector_)[read_index];
+    if (log_this_read) {
+      LOG(WARNING) << "[INTER_HMER_INS_QUALITY] read=" << read.fragment_name()
+                   << "/" << read.read_number()
+                   << " | read_index=" << read_index
+                   << " | col=" << col
+                   << " | value=" << static_cast<int>(data[col]);
+    }
   } else {
     data[col] = 0;
+    if (log_this_read) {
+      LOG(WARNING) << "[INTER_HMER_INS_QUALITY] OUT_OF_BOUNDS read="
+                   << read.fragment_name() << "/" << read.read_number()
+                   << " | read_index=" << read_index
+                   << " | col=" << col
+                   << " | vector_size="
+                   << inter_homopolymer_insertion_quality_vector_->size();
+    }
   }
 }
 
@@ -115,12 +151,14 @@ std::vector<std::uint8_t>
 InterHomopolymerInsertionQualityChannel::GetT0QualityValues(const Read& read) {
   // Get T0 values and convert them to color values
   // T0 values represent non-homopolymer insertion probabilities (Ultima-specific)
-  // and should use the same 40 quality cap as other homopolymer quality channels
+  // and should use the same base-quality cap as other homopolymer quality channels.
+  const int quality_cap = options_.base_quality_cap();
   auto t0_values = GetT0Values(read);
   std::vector<std::uint8_t> t0_quality_colors(t0_values.size());
 
   for (int i = 0; i < t0_values.size(); i++) {
-    t0_quality_colors[i] = channels::internal::BaseQualityColor(t0_values[i], 40);
+    t0_quality_colors[i] =
+        channels::internal::BaseQualityColor(t0_values[i], quality_cap);
   }
 
   return t0_quality_colors;

@@ -33,6 +33,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
 #include <cstdint>
 #include <limits>
 #include <string>
@@ -48,6 +49,18 @@
 namespace learning {
 namespace genomics {
 namespace deepvariant {
+
+namespace {
+
+bool ShouldLogHmerRead(const Read& read) {
+  const char* target_substr = std::getenv("DV_DEBUG_READ_SUBSTR");
+  if (target_substr == nullptr || target_substr[0] == '\0') {
+    return false;
+  }
+  return read.fragment_name().find(target_substr) != std::string::npos;
+}
+
+}  // namespace
 
 HomopolymerInDelQualityChannel::HomopolymerInDelQualityChannel(
     int width, const PileupImageOptions& options)
@@ -72,52 +85,143 @@ HomopolymerInDelQualityChannel::HomopolymerInDelQualityChannel(
 // homopolymer to be 5 + 2 = 7.
 std::vector<int8_t> HomopolymerInDelQualityChannel::GetTPValues(
     const Read& read) {
+  const bool inspect_tp_read = ShouldLogHmerRead(read);
   std::vector<int8_t> int_tps(read.aligned_sequence().size());
-  bool log_this_read = (read.fragment_name().find("2749846422") != std::string::npos);
-  
-  if (log_this_read) {
-    LOG(WARNING) << "[GET_TP_VALUES] START | read=" << read.fragment_name()
-               << " | has_tp_tag=" << read.info().contains("tp")
-               << " | seq_size=" << read.aligned_sequence().size();
-  }
-  
   if (!read.info().contains("tp")) {
-    // Return a vector of zeros if tp tag is not present.
-    if (log_this_read) {
-      LOG(WARNING) << "[GET_TP_VALUES] NO_TP_TAG | read=" << read.fragment_name();
+    if (inspect_tp_read) {
+      LOG(WARNING) << "[TP_DEBUG] read=" << read.fragment_name()
+                   << " | has_tp=0"
+                   << " | seq_size=" << read.aligned_sequence().size();
     }
+    // Return a vector of zeros if tp tag is not present.
     return int_tps;
   }
   const auto& tps = read.info().at("tp").values();
 
-  if (log_this_read) {
-    LOG(WARNING) << "[GET_TP_VALUES] TP_TAG_FOUND | read=" << read.fragment_name()
-               << " | tps.empty()=" << tps.empty()
-               << " | tps.size()=" << tps.size()
-               << " | expected_size=" << int_tps.size();
-  }
-
   if (tps.empty()) {
-    if (log_this_read) {
-      LOG(WARNING) << "[GET_TP_VALUES] EMPTY_TP_VALUES | read=" << read.fragment_name();
+    if (inspect_tp_read) {
+      LOG(WARNING) << "[TP_DEBUG] read=" << read.fragment_name()
+                   << " | has_tp=1"
+                   << " | tp_values_size=0"
+                   << " | seq_size=" << read.aligned_sequence().size();
     }
     return int_tps;
   }
 
-  for (int i = 0; i < tps.size() && i < int_tps.size(); i++) {
-    int_tps[i] = tps[i].int_value();
-    if (log_this_read && i < 20) {  // Log first 20 values only
-      LOG(WARNING) << "[GET_TP_VALUES] VALUE | read=" << read.fragment_name()
-                 << " | index=" << i
-                 << " | tp_value=" << static_cast<int>(int_tps[i]);
+  if (inspect_tp_read) {
+    LOG(WARNING) << "[TP_DEBUG] read=" << read.fragment_name()
+                 << " | has_tp=1"
+                 << " | tp_values_size=" << tps.size()
+                 << " | seq_size=" << read.aligned_sequence().size();
+    for (int i = 0; i < tps.size() && i < 8; ++i) {
+      const auto& tpv = tps[i];
+      std::string kind = "UNKNOWN";
+      if (tpv.kind_case() == nucleus::genomics::v1::Value::kIntValue) {
+        kind = "INT";
+      } else if (tpv.kind_case() == nucleus::genomics::v1::Value::kNumberValue) {
+        kind = "NUMBER";
+      } else if (tpv.kind_case() == nucleus::genomics::v1::Value::kStringValue) {
+        kind = "STRING";
+      }
+      LOG(WARNING) << "[TP_DEBUG] read=" << read.fragment_name()
+                   << " | idx=" << i
+                   << " | kind=" << kind
+                   << " | int_value=" << tpv.int_value()
+                   << " | number_value=" << tpv.number_value()
+                   << " | string_size=" << tpv.string_value().size();
     }
   }
-  
-  if (log_this_read) {
-    LOG(WARNING) << "[GET_TP_VALUES] COMPLETE | read=" << read.fragment_name()
-               << " | populated_count=" << (tps.size() < int_tps.size() ? tps.size() : int_tps.size());
+
+  // Decode TP values into a full vector first. If the read sequence is trimmed
+  // by region query, we may need to apply an offset before slicing to the
+  // current aligned_sequence() length.
+  std::vector<int8_t> decoded_tps;
+
+  // TP may be encoded as a single string where each char stores a signed
+  // offset relative to 'A' (matching haplotype's SRead decoding path).
+  if (tps.size() == 1 &&
+      tps[0].kind_case() == nucleus::genomics::v1::Value::kStringValue &&
+      !tps[0].string_value().empty()) {
+    const std::string& encoded_tps = tps[0].string_value();
+    decoded_tps.resize(encoded_tps.size());
+    for (int i = 0; i < encoded_tps.size(); i++) {
+      decoded_tps[i] = static_cast<int8_t>(
+          static_cast<int>(static_cast<unsigned char>(encoded_tps[i])) -
+          static_cast<int>('A'));
+    }
+  } else {
+    decoded_tps.resize(tps.size());
+    for (int i = 0; i < tps.size(); i++) {
+      const nucleus::genomics::v1::Value& tp_value = tps[i];
+      if (tp_value.kind_case() == nucleus::genomics::v1::Value::kIntValue) {
+        decoded_tps[i] = static_cast<int8_t>(tp_value.int_value());
+      } else if (tp_value.kind_case() ==
+                 nucleus::genomics::v1::Value::kNumberValue) {
+        decoded_tps[i] = static_cast<int8_t>(tp_value.number_value());
+      } else if (tp_value.kind_case() ==
+                     nucleus::genomics::v1::Value::kStringValue &&
+                 !tp_value.string_value().empty()) {
+        decoded_tps[i] = static_cast<int8_t>(
+            static_cast<int>(
+                static_cast<unsigned char>(tp_value.string_value()[0])) -
+            static_cast<int>('A'));
+      }
+    }
   }
-  
+
+  // If the read is trimmed, aligned_sequence can be a suffix of the original
+  // read represented by tp. In that case, use leading hard-clip length as
+  // offset into decoded_tps.
+  int tp_offset = 0;
+  if (read.has_alignment()) {
+    for (const auto& cigar_elt : read.alignment().cigar()) {
+      if (cigar_elt.operation() == nucleus::genomics::v1::CigarUnit::CLIP_HARD) {
+        tp_offset += cigar_elt.operation_length();
+      } else {
+        break;
+      }
+    }
+  }
+
+  // In some region-query code paths, tp is left untrimmed while
+  // aligned_sequence/aligned_quality are trimmed to the overlapping window,
+  // and CIGAR may not carry hard-clips for that trimming. In this case,
+  // fallback to aligning tp to the rightmost (same-length) window.
+  if (tp_offset == 0 && decoded_tps.size() > int_tps.size()) {
+    tp_offset = decoded_tps.size() - int_tps.size();
+  }
+
+  if (tp_offset < 0 || tp_offset >= decoded_tps.size()) {
+    tp_offset = 0;
+  }
+
+  for (int i = 0; i < int_tps.size(); i++) {
+    int decoded_index = tp_offset + i;
+    if (decoded_index >= 0 && decoded_index < decoded_tps.size()) {
+      int_tps[i] = decoded_tps[decoded_index];
+    }
+  }
+
+  if (inspect_tp_read) {
+    int non_zero_decoded = 0;
+    for (int i = 0; i < decoded_tps.size(); ++i) {
+      if (decoded_tps[i] != 0) ++non_zero_decoded;
+    }
+    int non_zero_final = 0;
+    for (int i = 0; i < int_tps.size(); ++i) {
+      if (int_tps[i] != 0) ++non_zero_final;
+    }
+    LOG(WARNING) << "[TP_DEBUG] read=" << read.fragment_name()
+                 << " | decoded_size=" << decoded_tps.size()
+                 << " | tp_offset=" << tp_offset
+                 << " | decoded_non_zero=" << non_zero_decoded
+                 << " | final_non_zero=" << non_zero_final;
+    for (int i = 0; i < int_tps.size() && i < 20; ++i) {
+      LOG(WARNING) << "[TP_DEBUG] read=" << read.fragment_name()
+                   << " | final_tp[" << i << "]=" << static_cast<int>(int_tps[i]);
+    }
+  }
+
   return int_tps;
 }
 
@@ -165,50 +269,37 @@ HomopolymerInDelQualityChannel::HomoPolymerInDelQuality(const Read& read,
   // in the read. The probabilities are encoded in phred-scores.
   // The parameter is_deletion determines the direction of the computed error
   // rate per homopolymer.
+  const int quality_cap = options_.base_quality_cap();
   std::vector<std::uint8_t> hmer_directed_qualities(
       read.aligned_sequence().size(),
-      channels::internal::BaseQualityColor(kMaxQScore));
-  
-  bool log_this_read = (read.fragment_name().find("2749846422") != std::string::npos);
-  if (log_this_read) {
-    LOG(WARNING) << "[HMER_INDEL_QUALITY] START | read=" << read.fragment_name() 
-             << " | is_deletion=" << is_deletion 
-             << " | seq_size=" << read.aligned_sequence().size()
-             << " | vector_size=" << hmer_directed_qualities.size()
-             << " | kMaxQScore=" << kMaxQScore;
-  }
+      channels::internal::BaseQualityColor(quality_cap, quality_cap));
 
   std::string seq(read.aligned_sequence());
   auto hmer_lengths = HomoPolymerWeighted(read);
   auto tps = GetTPValues(read);
-
-  if (log_this_read) {
-    LOG(WARNING) << "[HMER_INDEL_QUALITY] TP_TAG_CHECK | read=" << read.fragment_name()
-             << " | tps.empty()=" << tps.empty()
-             << " | tps.size()=" << tps.size()
-             << " | seq.size()=" << seq.size()
-             << " | tps=";
-    for (size_t k = 0; k < tps.size() && k < 20; k++) {
-      LOG(WARNING) << "tp[" << k << "]="  << static_cast<int>(tps[k]) << " ";
-    }
-  }
+  const bool log_this_read = ShouldLogHmerRead(read);
 
   // If tp tag is not present, return default quality values
   if (tps.empty() || tps.size() != seq.size()) {
     if (log_this_read) {
-      LOG(WARNING) << "[HMER_INDEL_QUALITY] RETURNING_DEFAULT | read=" << read.fragment_name()
-                 << " | reason=no_tp_tag";
+      LOG(WARNING) << "[HMER_INDEL_READ] read=" << read.fragment_name()
+                   << "/" << read.read_number()
+                   << " | is_deletion=" << is_deletion
+                   << " | status=missing_or_mismatched_tp"
+                   << " | seq_size=" << seq.size()
+                   << " | tp_size=" << tps.size();
     }
     return hmer_directed_qualities;
   }
 
   if (log_this_read) {
-    LOG(WARNING) << "[HMER_INDEL_QUALITY] READ_QUALITIES | read=" << read.fragment_name()
-               << " | aligned_quality_size=" << read.aligned_quality().size()
-               << " | aligned_quality_values=";
-    for (size_t k = 0; k < read.aligned_quality().size() && k < 20; k++) {
-      LOG(WARNING) << "q[" << k << "]="  << static_cast<int>(read.aligned_quality()[k]) << " ";
-    }
+    LOG(WARNING) << "[HMER_INDEL_READ] read=" << read.fragment_name()
+                 << "/" << read.read_number()
+                 << " | is_deletion=" << is_deletion
+                 << " | status=begin"
+                 << " | seq_size=" << seq.size()
+                 << " | qual_size=" << read.aligned_quality().size()
+                 << " | quality_cap=" << quality_cap;
   }
 
   int i = 0;
@@ -216,92 +307,88 @@ HomopolymerInDelQualityChannel::HomoPolymerInDelQuality(const Read& read,
     int hmer_length = hmer_lengths[i];
     float hmer_directed_error_prob = 0;
 
-    if (log_this_read) {
-      LOG(WARNING) << "[HMER_INDEL_QUALITY] HMER_GROUP | read=" << read.fragment_name()
-                 << " | hmer_start=" << i
-                 << " | hmer_length=" << hmer_length
-                 << " | is_deletion=" << is_deletion;
-    }
-
     // Iterate quality encodings for hmer [i], and sum them up to upward
     // direction or downward direction quality PHRED scores.
     for (int j = 0; j < hmer_length; j++) {
-      int pos = i + j;
-      std::uint8_t encoded_hmer_qual = read.aligned_quality()[pos];
-      int tp_value = tps[pos];
-      bool is_deletion_err = tp_value < 0;
-      
-      if (log_this_read) {
-        LOG(WARNING) << "[HMER_INDEL_QUALITY] BASE | read=" << read.fragment_name()
-                   << " | pos=" << pos
-                   << " | encoded_qual=" << static_cast<int>(encoded_hmer_qual)
-                   << " | tp=" << tp_value
-                   << " | is_deletion_err=" << is_deletion_err
-                   << " | matches_direction=" << (is_deletion_err == is_deletion);
-      }
+      const int pos = i + j;
+      const int tp_value = tps[pos];
+      const int encoded_hmer_qual = read.aligned_quality()[pos];
+      float error_prob_component = 0;
+      bool contributes = false;
 
       if (tp_value == 0) {
         if (log_this_read) {
-          LOG(WARNING) << "[HMER_INDEL_QUALITY] SKIPPING_ZERO_TP | pos=" << pos;
+          LOG(WARNING) << "[HMER_INDEL_BASE] read=" << read.fragment_name()
+                       << "/" << read.read_number()
+                       << " | is_deletion=" << is_deletion
+                       << " | hmer_start=" << i
+                       << " | hmer_length=" << hmer_length
+                       << " | pos=" << pos
+                       << " | tp=0"
+                       << " | encoded_qual=" << encoded_hmer_qual
+                       << " | contributes=0"
+                       << " | error_prob_component=0";
         }
         continue;
       }
-      
+
+      bool is_deletion_err = tp_value < 0;
       if (is_deletion_err == is_deletion) {
-        float error_prob = std::pow(10, (encoded_hmer_qual / -10.0));
-        if (log_this_read) {
-          LOG(WARNING) << "[HMER_INDEL_QUALITY] ADDING_ERROR_PROB | pos=" << pos
-                     << " | encoded_qual=" << static_cast<int>(encoded_hmer_qual)
-                     << " | error_prob_component=" << error_prob;
-        }
-        hmer_directed_error_prob += error_prob;
+        error_prob_component = std::pow(10, (encoded_hmer_qual / -10.0));
+        hmer_directed_error_prob += error_prob_component;
+        contributes = true;
+      }
+
+      if (log_this_read) {
+        LOG(WARNING) << "[HMER_INDEL_BASE] read=" << read.fragment_name()
+                     << "/" << read.read_number()
+                     << " | is_deletion=" << is_deletion
+                     << " | hmer_start=" << i
+                     << " | hmer_length=" << hmer_length
+                     << " | pos=" << pos
+                     << " | tp=" << tp_value
+                     << " | encoded_qual=" << encoded_hmer_qual
+                     << " | contributes=" << contributes
+                     << " | error_prob_component=" << error_prob_component;
       }
     }
 
     int hmer_directed_quality =
         hmer_directed_error_prob == 0
-            ? kMaxQScore
+            ? quality_cap
             : static_cast<int>(-10 * std::log10(hmer_directed_error_prob));
-    
-    if (log_this_read) {
-      LOG(WARNING) << "[HMER_INDEL_QUALITY] FINAL_QUALITY | read=" << read.fragment_name()
-                 << " | hmer_start=" << i
-                 << " | hmer_length=" << hmer_length
-                 << " | total_error_prob=" << hmer_directed_error_prob
-                 << " | computed_quality=" << hmer_directed_quality
-                 << " | color_value=" << static_cast<int>(channels::internal::BaseQualityColor(hmer_directed_quality, 40));
+    // Clamp to valid range
+    if (hmer_directed_quality > quality_cap) {
+      hmer_directed_quality = quality_cap;
     }
 
-    // Clamp to valid range
-    if (hmer_directed_quality > kMaxQScore) {
-      if (log_this_read) {
-        LOG(WARNING) << "[HMER_INDEL_QUALITY] CLAMPING | original=" << hmer_directed_quality
-                   << " | to_max=" << kMaxQScore;
-      }
-      hmer_directed_quality = kMaxQScore;
+    if (log_this_read) {
+      LOG(WARNING) << "[HMER_INDEL_HMER] read=" << read.fragment_name()
+                   << "/" << read.read_number()
+                   << " | is_deletion=" << is_deletion
+                   << " | hmer_start=" << i
+                   << " | hmer_length=" << hmer_length
+                   << " | total_error_prob=" << hmer_directed_error_prob
+                   << " | computed_quality=" << hmer_directed_quality
+                   << " | color_value="
+                   << static_cast<int>(channels::internal::BaseQualityColor(
+                          hmer_directed_quality, quality_cap));
     }
 
     for (int j = 0; j < hmer_length; j++) {
-      int pos = i + j;
-      // Use max_quality of 40 for homopolymer quality color scaling (Ultima standard)
-      std::uint8_t color_value = channels::internal::BaseQualityColor(hmer_directed_quality, 40);
-      hmer_directed_qualities[pos] = color_value;
-      if (log_this_read) {
-        LOG(WARNING) << "[HMER_INDEL_QUALITY_FULL] read=" << read.fragment_name()
-                   << " | pos=" << pos
-                   << " | quality=" << hmer_directed_quality
-                   << " | color_value=" << static_cast<int>(color_value);
-      }
+      hmer_directed_qualities[i + j] =
+          channels::internal::BaseQualityColor(hmer_directed_quality,
+                                               quality_cap);
     }
     i += hmer_length;
   }
-  
   if (log_this_read) {
-    LOG(WARNING) << "[HMER_INDEL_QUALITY] COMPLETE | read=" << read.fragment_name()
-               << " | is_deletion=" << is_deletion
-               << " | final_vector_size=" << hmer_directed_qualities.size();
+    LOG(WARNING) << "[HMER_INDEL_READ] read=" << read.fragment_name()
+                 << "/" << read.read_number()
+                 << " | is_deletion=" << is_deletion
+                 << " | status=end"
+                 << " | output_size=" << hmer_directed_qualities.size();
   }
-  
   return hmer_directed_qualities;
 }
 
