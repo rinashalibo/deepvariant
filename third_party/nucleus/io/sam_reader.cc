@@ -773,13 +773,6 @@ std::map<string, string> ParseBaseModifications(
   read_message->set_fragment_name(bam_get_qname(b));
   read_message->set_fragment_length(c->isize);
   read_message->set_proper_placement(c->flag & BAM_FPROPER_PAIR);
-  
-  // DEBUG: Log read information when loaded from SAM/BAM/CRAM
-  LOG(INFO) << "=== SAM_READER: Read Loaded ==="
-            << " | Name: " << read_message->fragment_name()
-            << " | Mapped: " << (!(c->flag & BAM_FUNMAP) ? "true" : "false")
-            << " | Paired: " << ((c->flag & BAM_FPAIRED) ? "true" : "false")
-            << " | MapQ: " << static_cast<int>(c->qual);
   read_message->set_duplicate_fragment(c->flag & BAM_FDUP);
   read_message->set_failed_vendor_quality_checks(c->flag & BAM_FQCFAIL);
   read_message->set_secondary_alignment(c->flag & BAM_FSECONDARY);
@@ -873,18 +866,6 @@ std::map<string, string> ParseBaseModifications(
   if (!status.ok()) {
     LOG(WARNING) << "Could not read base quality scores " << bam_get_qname(b)
                  << ": " << status;
-  }
-  
-  // DEBUG: Log quality scores for the read
-  if (!read_message->aligned_quality().empty()) {
-    std::string qual_scores;
-    for (size_t i = 0; i < read_message->aligned_quality().size(); ++i) {
-      qual_scores += std::to_string(static_cast<int>(read_message->aligned_quality()[i]));
-      if (i < read_message->aligned_quality().size() - 1) {
-        qual_scores += ",";
-      }
-    }
-    LOG(INFO) << "SAM_READER Quality_scores: [" << qual_scores << "]";
   }
 
   return ::nucleus::Status();
@@ -1090,9 +1071,6 @@ StatusOr<std::shared_ptr<SamIterable>> SamReader::Iterate() const {
 
 StatusOr<std::shared_ptr<SamIterable>> SamReader::Query(
     const Range& region) const {
-  LOG(INFO) << "SAM_READER: Query called for region " 
-            << region.reference_name() << ":" 
-            << region.start() << "-" << region.end();
   if (fp_ == nullptr)
     return ::nucleus::FailedPrecondition("Cannot Query a closed SamReader.");
   if (!HasIndex()) {

@@ -36,8 +36,6 @@
 #include <cstdlib>
 #include <functional>
 #include <memory>
-#include <set>
-#include <sstream>
 #include <string>
 #include <vector>
 
@@ -90,46 +88,6 @@ namespace learning {
 namespace genomics {
 namespace deepvariant {
 
-namespace {
-
-std::vector<int> ParseTraceChannelIndicesFromEnv() {
-  const char* env_value = std::getenv("DV_TRACE_CHANNEL_INDICES");
-  std::string value =
-      (env_value == nullptr || env_value[0] == '\0') ? "6,7,8" : env_value;
-  std::set<int> unique_indices;
-  std::stringstream ss(value);
-  std::string token;
-  while (std::getline(ss, token, ',')) {
-    if (token.empty()) {
-      continue;
-    }
-    try {
-      unique_indices.insert(std::stoi(token));
-    } catch (...) {
-    }
-  }
-  return std::vector<int>(unique_indices.begin(), unique_indices.end());
-}
-
-const std::vector<int>& TraceChannelIndices() {
-  static const std::vector<int> kTraceChannelIndices =
-      ParseTraceChannelIndicesFromEnv();
-  return kTraceChannelIndices;
-}
-
-bool ShouldTraceRead(const Read& read) {
-  const char* target_substr = std::getenv("DV_TRACE_READ_SUBSTR");
-  if (target_substr == nullptr || target_substr[0] == '\0') {
-    target_substr = std::getenv("DV_DEBUG_READ_SUBSTR");
-  }
-  if (target_substr == nullptr || target_substr[0] == '\0') {
-    return false;
-  }
-  return read.fragment_name().find(target_substr) != std::string::npos;
-}
-
-}  // namespace
-
 bool Channels::CalculateChannels(
     std::vector<std::vector<unsigned char>>& data,
     absl::Span<const DeepVariantChannelEnum> channel_enums, const Read& read,
@@ -139,13 +97,6 @@ bool Channels::CalculateChannels(
   CHECK_EQ(data.size(), channel_enums.size())
       << "Size of provided data vector does not match the number of channels "
          "specified";
-
-  const bool log_this_read = ShouldTraceRead(read);
-  const std::vector<int>& trace_channel_indices = TraceChannelIndices();
-  if (log_this_read) {
-    LOG(WARNING) << "[CH_TRACE] start read=" << read.fragment_name() << "/"
-                 << read.read_number();
-  }
 
   int maxEnumValue = getMaxEnumValue(channel_enums);
   channel_enum_to_index_ = std::vector<int>(maxEnumValue + 1);
@@ -160,10 +111,6 @@ bool Channels::CalculateChannels(
   for (const DeepVariantChannelEnum channel_enum : channel_enums) {
     channel_objects[channel_enum] =
         Channels::ChannelEnumToObject(channel_enum, ref_bases.size(), options_);
-    if (log_this_read) {
-      LOG(WARNING) << "[CH_TRACE] channel_index=" << channel_enum_to_index_[channel_enum]
-                   << " | channel_enum=" << channel_enum;
-    }
   }
 
   /*--------------------------------------
@@ -177,7 +124,7 @@ bool Channels::CalculateChannels(
   // have a low quality base at the call position (in which case we
   // should return null) from EncodeRead.
   std::function<bool(int, int, const CigarUnit::Operation&)>
-      action_per_cigar_unit = [&, channel_enums, ref_bases, log_this_read](
+      action_per_cigar_unit = [&, channel_enums, ref_bases](
                                   int ref_i, int read_i,
                                   const CigarUnit::Operation& cigar_op) {
         char read_base = 0;
@@ -193,131 +140,30 @@ bool Channels::CalculateChannels(
         }
 
         size_t col = ref_i - image_start_pos;
-        
-        if (log_this_read) {
-          LOG(WARNING) << "    >> action_per_cigar_unit called: ref_i=" << ref_i 
-                       << " | read_i=" << read_i 
-                       << " | col=" << col 
-                       << " | read_base=" << read_base
-                       << " | valid_range=" << (0 <= col && col < ref_bases.size());
-        }
-        
         if (read_base && 0 <= col && col < ref_bases.size()) {
           uint8_t base_quality = read.aligned_quality()[read_i];
-          
-          if (log_this_read) {
-            LOG(WARNING) << "    >> Processing position: col=" << col 
-                         << " | base_quality=" << static_cast<int>(base_quality);
-          }
-          
           // Bail out if we found this read had a low-quality base at the
           // call site.
           if (ref_i == dv_call.variant().start() &&
               base_quality < options_.read_requirements().min_base_quality()) {
-            LOG(WARNING) << "[READ_FILTER_REASON] read=" << read.fragment_name()
-                         << "/" << read.read_number()
-                         << " | reason=min_base_quality_at_callsite"
-                         << " | ref_pos=" << ref_i
-                         << " | read_index=" << read_i
-                         << " | base_quality=" << static_cast<int>(base_quality)
-                         << " | threshold="
-                         << options_.read_requirements().min_base_quality();
             return false;
           }
           char ref_base = ref_bases[col];
-          
-          // DEBUG: Log CIGAR unit processing only for target read
-          if (log_this_read) {
-            const char* cigar_op_name = "UNKNOWN";
-            if (cigar_op == CigarUnit::INSERT) cigar_op_name = "INSERT";
-            else if (cigar_op == CigarUnit::DELETE) cigar_op_name = "DELETE";
-            else if (cigar_op == CigarUnit::ALIGNMENT_MATCH) cigar_op_name = "MATCH";
-            else if (cigar_op == CigarUnit::SEQUENCE_MATCH) cigar_op_name = "SEQ_MATCH";
-            else if (cigar_op == CigarUnit::SEQUENCE_MISMATCH) cigar_op_name = "SEQ_MISMATCH";
-            
-            LOG(WARNING) << "  >> CIGAR: " << cigar_op_name
-                      << " | ref_pos: " << ref_i 
-                      << " | read_pos: " << read_i
-                      << " | col: " << col
-                      << " | read_base: " << read_base
-                      << " | ref_base: " << ref_base
-                      << " | base_qual: " << static_cast<int>(base_quality);
-          }
-          
           // Calculate channel values
-          std::string channel_updates_str;
           for (const DeepVariantChannelEnum channel_enum : channel_enums) {
             if (!channels_enum_to_blank.contains(channel_enum)) {
               CHECK_LT(col, ref_bases.size());
               CHECK_GE(col, 0);
               int index = channel_enum_to_index_[channel_enum];
-              
-              // Store value before FillReadBase
-              unsigned char value_before = data[index][col];
-              
               channel_objects[channel_enum]->FillReadBase(
                   data[index], col, read_base, ref_base, base_quality, read,
                   read_i, dv_call, alt_alleles);
-              
-              // Accumulate channel update for logging (only for target read)
-              if (log_this_read) {
-                unsigned char value_after = data[index][col];
-                if (!channel_updates_str.empty()) {
-                  channel_updates_str += " | ";
-                }
-                channel_updates_str += "Ch[" + std::to_string(index) + "](" +
-                    std::to_string(channel_enum) + "):" +
-                    std::to_string(value_before) + "->" +
-                    std::to_string(value_after);
-              }
             }
-          }
-          
-          // Log all channel updates on one line
-          if (log_this_read && !channel_updates_str.empty()) {
-            LOG(WARNING) << "    CHANNELS_UPDATED: " << channel_updates_str;
-          }
-
-          if (log_this_read && !trace_channel_indices.empty()) {
-            std::stringstream channel_snapshot;
-            bool wrote_any = false;
-            for (int channel_index : trace_channel_indices) {
-              if (channel_index < 0 || channel_index >= data.size()) {
-                continue;
-              }
-              if (wrote_any) {
-                channel_snapshot << " | ";
-              }
-              channel_snapshot << "ch[" << channel_index << "]="
-                               << static_cast<int>(data[channel_index][col]);
-              wrote_any = true;
-            }
-            if (wrote_any) {
-              LOG(WARNING) << "[CH_TRACE] read=" << read.fragment_name() << "/"
-                           << read.read_number() << " | col=" << col << " | "
-                           << channel_snapshot.str();
-            }
-          }
-        } else {
-          if (log_this_read && read_base) {
-            LOG(WARNING) << "    >> SKIPPED: out of range or no read_base";
           }
         }
         return true;
       };
-  
-  if (log_this_read) {
-    LOG(WARNING) << ">> CalculateChannels PROCESSING base-level data for Read: " << read.fragment_name();
-  }
-  
-  bool result = CalculateBaseLevelData(read, action_per_cigar_unit);
-  
-  if (log_this_read) {
-    LOG(WARNING) << "[CH_TRACE] end read=" << read.fragment_name() << "/"
-                 << read.read_number() << " | result=" << result;
-  }
-  
-  return result;
+  return CalculateBaseLevelData(read, action_per_cigar_unit);
 }
 
 // Calculate values for channels that depend on information at the
@@ -376,7 +222,6 @@ bool Channels::CalculateBaseLevelData(
       case CigarUnit::SEQUENCE_MATCH:
       case CigarUnit::SEQUENCE_MISMATCH:
         // Alignment op.
-        LOG(WARNING) << "READ: " << read.fragment_name() << " | CIGAR OP: ALIGNMENT (MATCH/SEQ_MATCH/SEQ_MISMATCH) | len=" << op_len << " | ref_i=" << ref_i << " | read_i=" << read_i;
         for (int i = 0; i < op_len; i++) {
           ok = ok && action_per_cigar_unit(ref_i, read_i, op);
           ref_i++;
@@ -386,7 +231,6 @@ bool Channels::CalculateBaseLevelData(
       case CigarUnit::INSERT:
       case CigarUnit::CLIP_SOFT:
         // Insert op.
-        LOG(WARNING) << "READ: " << read.fragment_name() << " | CIGAR OP: INSERT | len=" << op_len << " | ref_i=" << ref_i << " | read_i=" << read_i;
         if (ref_i > 0) {
           ok = action_per_cigar_unit(ref_i - 1, read_i, op);
         }
@@ -395,7 +239,6 @@ bool Channels::CalculateBaseLevelData(
       case CigarUnit::DELETE:
       case CigarUnit::SKIP:
         // Delete op.
-        LOG(WARNING) << "READ: " << read.fragment_name() << " | CIGAR OP: DELETE | len=" << op_len << " | ref_i=" << ref_i << " | read_i=" << read_i;
         if (read_i > 0) {
           ok = action_per_cigar_unit(ref_i, read_i - 1, op);
         }
@@ -404,7 +247,6 @@ bool Channels::CalculateBaseLevelData(
       case CigarUnit::CLIP_HARD:
       case CigarUnit::PAD:
         // Ignored ops.  Do nothing.
-        LOG(WARNING) << "READ: " << read.fragment_name() << " | CIGAR OP: IGNORED (CLIP_HARD/PAD) | len=" << op_len;
         break;
       default:
         LOG(FATAL) << "Unrecognized CIGAR op";

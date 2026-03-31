@@ -36,8 +36,6 @@
 #include <memory>
 #include <numeric>
 #include <random>
-#include <cstdlib>
-#include <sstream>
 #include <string>
 #include <tuple>
 #include <utility>
@@ -68,21 +66,6 @@ using learning::genomics::deepvariant::DeepVariantCall;
 namespace learning {
 namespace genomics {
 namespace deepvariant {
-
-namespace {
-
-bool ShouldTraceRead(const Read& read) {
-  const char* target_substr = std::getenv("DV_TRACE_READ_SUBSTR");
-  if (target_substr == nullptr || target_substr[0] == '\0') {
-    target_substr = std::getenv("DV_DEBUG_READ_SUBSTR");
-  }
-  if (target_substr == nullptr || target_substr[0] == '\0') {
-    return false;
-  }
-  return read.fragment_name().find(target_substr) != std::string::npos;
-}
-
-}  // namespace
 
 // Define a tuple type for sorting:
 // <hap_index, allele_support_group, position, read_ptr, image_row_ptr>
@@ -342,13 +325,7 @@ PileupImageEncoderNative::BuildPileupForOneSample(
   // Create a downsampled vector of read indices.
   std::vector<int> sampled_indices(max_reads);
   auto gen = std::mt19937_64(options_.random_seed());
-  const bool ug_compat_no_shuffle =
-      std::getenv("DV_UG_COMPAT_NO_SHUFFLE") != nullptr;
-  if (ug_compat_no_shuffle) {
-    sampled_indices.resize(std::min(static_cast<int>(reads.size()), max_reads));
-    std::iota(sampled_indices.begin(), sampled_indices.end(), 0);
-    LOG(WARNING) << "[FINAL_IMAGE_ORDER] UG_COMPAT_NO_SHUFFLE enabled";
-  } else if (sample_options.use_non_uniform_downsampling()) {
+  if (sample_options.use_non_uniform_downsampling()) {
     // Sampling with thresholds may fail if the threshold is too high, so we
     // fall back to uniform sampling if that happens.
     auto status_or_sampled_indices = DownsampleReadIndicesWithMinsPerAllele(
@@ -365,30 +342,6 @@ PileupImageEncoderNative::BuildPileupForOneSample(
   } else {
     sampled_indices = DownsampleReadIndices(reads, max_reads, gen);
   }
-
-  int traced_total_reads = 0;
-  int traced_sampled_reads = 0;
-  for (int i = 0; i < reads.size(); ++i) {
-    if (ShouldTraceRead(*reads[i])) {
-      traced_total_reads++;
-    }
-  }
-  for (int index : sampled_indices) {
-    if (index >= 0 && index < reads.size() && ShouldTraceRead(*reads[index])) {
-      traced_sampled_reads++;
-    }
-  }
-  if (traced_total_reads > 0) {
-    LOG(WARNING) << "[ROW_TRACE] variant=" << dv_call.variant().reference_name()
-                 << ":" << dv_call.variant().start()
-                 << " | traced_total_reads=" << traced_total_reads
-                 << " | traced_sampled_reads=" << traced_sampled_reads;
-  }
-
-  LOG(WARNING) << "[FINAL_IMAGE_ORDER] variant=" << dv_call.variant().reference_name()
-               << ":" << dv_call.variant().start()
-               << " | total_reads=" << reads.size()
-               << " | sampled_reads=" << sampled_indices.size();
 
   // Precompute read-to-allele_group mapping if sorting by alt allele support.
   absl::flat_hash_map<std::string, int> read_name_to_allele_group_map;
@@ -444,13 +397,6 @@ PileupImageEncoderNative::BuildPileupForOneSample(
             ? read.alignment().position().position()
             : alignment_positions->at(index);
 
-    if (ShouldTraceRead(read)) {
-      LOG(WARNING) << "[ROW_TRACE] pre_sort read=" << read.fragment_name()
-             << "/" << read.read_number() << " | hap_idx=" << hap_idx
-             << " | allele_group=" << allele_support_group
-             << " | align_pos=" << read_align_pos;
-    }
-
     pileup_of_reads.emplace_back(hap_idx, allele_support_group,
                                  static_cast<int>(read_align_pos), &read,
                                  std::move(image_row));
@@ -458,25 +404,9 @@ PileupImageEncoderNative::BuildPileupForOneSample(
 
   absl::c_stable_sort(pileup_of_reads,
                    SortImageRows);
-  LOG(WARNING) << "[FINAL_IMAGE_ORDER] rows_in_image=" << pileup_of_reads.size();
-  int final_row_index = options_.reference_band_height();
   for (auto& [hap_idx, allele_group, pos, read_ptr, row_ptr] :
        pileup_of_reads) {
-    LOG(WARNING) << "[FINAL_IMAGE_ORDER] row_index=" << final_row_index
-                 << " | read=" << read_ptr->fragment_name()
-                 << "/" << read_ptr->read_number()
-                 << " | hap_idx=" << hap_idx
-                 << " | allele_group=" << allele_group
-                 << " | align_pos=" << pos;
-    if (ShouldTraceRead(*read_ptr)) {
-      LOG(WARNING) << "[ROW_TRACE] post_sort row_index=" << final_row_index
-                   << " | read=" << read_ptr->fragment_name() << "/"
-                   << read_ptr->read_number() << " | hap_idx=" << hap_idx
-                   << " | allele_group=" << allele_group
-                   << " | align_pos=" << pos;
-    }
     rows.push_back(std::move(row_ptr));
-    ++final_row_index;
   }
 
   // Finally, fill in any missing rows to bring our image to pileup_height rows
@@ -511,18 +441,6 @@ PileupImageEncoderNative::BuildPileupForOneSample(
                                                              kChannelValue200);
       }
     }
-  }
-
-  LOG(WARNING) << "=== PILEUP END | Final assembly: " << rows.size() << " rows total"
-            << " (ref_band=" << options_.reference_band_height() 
-            << ", reads=" << pileup_of_reads.size()
-            << ", empty=" << empty_rows << ")"
-            << " | Width=" << ref_bases.size();
-  for (int i = 0; i < std::min(5, static_cast<int>(pileup_of_reads.size())); ++i) {
-    const auto& [hap_idx, allele_group, pos, read_ptr, row_ptr] = pileup_of_reads[i];
-    LOG(WARNING) << "  Final[" << i << "]: " << read_ptr->fragment_name()
-              << " | hap=" << hap_idx << " | allele_grp=" << allele_group 
-              << " | pos=" << pos;
   }
 
   return rows;
@@ -567,14 +485,8 @@ std::unique_ptr<ImageRow> PileupImageEncoderNative::EncodeRead(
   const int mapping_quality = read.alignment().mapping_quality();
   const int min_mapping_quality =
       options_.read_requirements().min_mapping_quality();
-  
   if (mapping_quality < min_mapping_quality) {
     // Bail early if this read's mapping quality is too low.
-    LOG(WARNING) << "[READ_FILTER_REASON] read=" << read.fragment_name()
-                 << "/" << read.read_number()
-                 << " | reason=min_mapping_quality"
-                 << " | mapq=" << mapping_quality
-                 << " | threshold=" << min_mapping_quality;
     return nullptr;
   }
 
@@ -591,11 +503,9 @@ std::unique_ptr<ImageRow> PileupImageEncoderNative::EncodeRead(
   // Bail out if we found an issue while calculating channels
   // (a low-quality base at the call site, mapping quality is too low, etc)
   if (!ok) {
-    LOG(WARNING) << "[READ_FILTER_REASON] read=" << read.fragment_name()
-                 << "/" << read.read_number()
-                 << " | reason=channel_calculation_failed";
     return nullptr;
   }
+
   return std::make_unique<ImageRow>(img_row);
 }
 

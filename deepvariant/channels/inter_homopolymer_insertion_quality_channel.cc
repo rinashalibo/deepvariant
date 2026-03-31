@@ -31,7 +31,6 @@
 
 #include "deepvariant/channels/inter_homopolymer_insertion_quality_channel.h"
 
-#include <cstdlib>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -46,18 +45,6 @@ namespace learning {
 namespace genomics {
 namespace deepvariant {
 
-namespace {
-
-bool ShouldLogHmerRead(const Read& read) {
-  const char* target_substr = std::getenv("DV_DEBUG_READ_SUBSTR");
-  if (target_substr == nullptr || target_substr[0] == '\0') {
-    return false;
-  }
-  return read.fragment_name().find(target_substr) != std::string::npos;
-}
-
-}  // namespace
-
 InterHomopolymerInsertionQualityChannel::
     InterHomopolymerInsertionQualityChannel(int width,
                                             const PileupImageOptions& options)
@@ -68,37 +55,14 @@ void InterHomopolymerInsertionQualityChannel::FillReadBase(
     int base_quality, const Read& read, int read_index,
     const DeepVariantCall& dv_call,
     const std::vector<std::string>& alt_alleles) {
-  const bool log_this_read = ShouldLogHmerRead(read);
   if (!inter_homopolymer_insertion_quality_vector_.has_value()) {
     inter_homopolymer_insertion_quality_vector_ = GetT0QualityValues(read);
-    if (log_this_read) {
-      LOG(WARNING) << "[INTER_HMER_INS_QUALITY] COMPUTED_VECTOR read="
-                   << read.fragment_name() << "/" << read.read_number()
-                   << " | vector_size="
-                   << inter_homopolymer_insertion_quality_vector_->size()
-                   << " | seq_size=" << read.aligned_sequence().size();
-    }
   }
   if (read_index >= 0 &&
       read_index < inter_homopolymer_insertion_quality_vector_->size()) {
     data[col] = (*inter_homopolymer_insertion_quality_vector_)[read_index];
-    if (log_this_read) {
-      LOG(WARNING) << "[INTER_HMER_INS_QUALITY] read=" << read.fragment_name()
-                   << "/" << read.read_number()
-                   << " | read_index=" << read_index
-                   << " | col=" << col
-                   << " | value=" << static_cast<int>(data[col]);
-    }
   } else {
     data[col] = 0;
-    if (log_this_read) {
-      LOG(WARNING) << "[INTER_HMER_INS_QUALITY] OUT_OF_BOUNDS read="
-                   << read.fragment_name() << "/" << read.read_number()
-                   << " | read_index=" << read_index
-                   << " | col=" << col
-                   << " | vector_size="
-                   << inter_homopolymer_insertion_quality_vector_->size();
-    }
   }
 }
 

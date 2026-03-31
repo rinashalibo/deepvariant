@@ -31,30 +31,15 @@
 
 #include "deepvariant/channels/homopolymer_deletion_quality_channel.h"
 
-#include <cstdlib>
-#include <string>
 #include <vector>
 
 #include "deepvariant/channels/channel.h"
 #include "deepvariant/channels/homopolymer_indel_quality_channel.h"
 #include "deepvariant/protos/deepvariant.pb.h"
-#include "absl/log/log.h"
 
 namespace learning {
 namespace genomics {
 namespace deepvariant {
-
-namespace {
-
-bool ShouldLogHmerRead(const Read& read) {
-  const char* target_substr = std::getenv("DV_DEBUG_READ_SUBSTR");
-  if (target_substr == nullptr || target_substr[0] == '\0') {
-    return false;
-  }
-  return read.fragment_name().find(target_substr) != std::string::npos;
-}
-
-}  // namespace
 
 HomopolymerDeletionQualityChannel::HomopolymerDeletionQualityChannel(
     int width, const PileupImageOptions& options)
@@ -65,7 +50,6 @@ void HomopolymerDeletionQualityChannel::FillReadBase(
     int base_quality, const Read& read, int read_index,
     const DeepVariantCall& dv_call,
     const std::vector<std::string>& alt_alleles) {
-  const bool log_this_read = ShouldLogHmerRead(read);
   if (!homopolymer_deletion_quality_vector_.has_value()) {
     homopolymer_deletion_quality_vector_ =
         HomoPolymerInDelQuality(read, true);  // true = deletion
@@ -75,25 +59,8 @@ void HomopolymerDeletionQualityChannel::FillReadBase(
                         read_index < homopolymer_deletion_quality_vector_->size());
   if (is_valid_index) {
     data[col] = (*homopolymer_deletion_quality_vector_)[read_index];
-    if (log_this_read) {
-      LOG(WARNING) << "[HMER_DEL_QUALITY] read=" << read.fragment_name()
-                   << "/" << read.read_number()
-                   << " | read_index=" << read_index
-                   << " | col=" << col
-                   << " | value=" << static_cast<int>(data[col])
-                   << " | vector_size="
-                   << homopolymer_deletion_quality_vector_->size();
-    }
   } else {
     data[col] = 0;
-    if (log_this_read) {
-      LOG(WARNING) << "[HMER_DEL_QUALITY] OUT_OF_BOUNDS! read="
-                   << read.fragment_name() << "/" << read.read_number()
-                   << " | read_index=" << read_index
-                   << " | col=" << col
-                   << " | vector_size="
-                   << homopolymer_deletion_quality_vector_->size();
-    }
   }
 }
 

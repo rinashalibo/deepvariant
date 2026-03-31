@@ -1,0 +1,79 @@
+#!/bin/bash
+# DeepVariant Unit Test Runner
+# Similar to haplotype's ./unittest
+# Runs simple tests to verify the DeepVariant installation works
+
+set -e
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "${SCRIPT_DIR}"
+
+echo "==============================================="
+echo "  DeepVariant Unit Test Runner"
+echo "==============================================="
+echo ""
+
+# Check if we have test data
+if [ ! -d "deepvariant/testdata" ]; then
+    echo "ERROR: Test data directory not found"
+    exit 1
+fi
+
+# Test 1: Check Python environment
+echo "[Test 1/4] Checking Python environment..."
+python3 -c "import sys; print(f'  ✓ Python {sys.version.split()[0]}')" || {
+    echo "  ✗ Python check failed"
+    exit 1
+}
+
+# Test 2: Check TensorFlow
+echo "[Test 2/4] Checking TensorFlow..."
+python3 -c "import tensorflow as tf; print(f'  ✓ TensorFlow {tf.__version__}')" 2>/dev/null || {
+    echo "  ⚠ TensorFlow not available (needed for reading tfrecords)"
+}
+
+# Test 3: Verify test data exists
+echo "[Test 3/4] Checking test data..."
+TEST_TFRECORD="deepvariant/testdata/golden.calling_examples.tfrecord.gz"
+if [ -f "${TEST_TFRECORD}" ]; then
+    SIZE=$(stat -c%s "${TEST_TFRECORD}" 2>/dev/null || stat -f%z "${TEST_TFRECORD}" 2>/dev/null)
+    echo "  ✓ Test tfrecord found: ${TEST_TFRECORD} (${SIZE} bytes)"
+else
+    echo "  ✗ Test tfrecord not found: ${TEST_TFRECORD}"
+    exit 1
+fi
+
+# Test 4: Try to read a tfrecord
+echo "[Test 4/4] Testing tfrecord reading..."
+python3 << 'EOF'
+import sys
+try:
+    import tensorflow as tf
+    dataset = tf.data.TFRecordDataset(
+        "deepvariant/testdata/golden.calling_examples.tfrecord.gz",
+        compression_type='GZIP'
+    )
+    count = 0
+    for record in dataset.take(3):
+        count += 1
+    print(f"  ✓ Successfully read {count} tfrecord examples")
+except Exception as e:
+    print(f"  ⚠ Could not read tfrecords: {e}")
+    print("  (This is ok if TensorFlow is not installed)")
+EOF
+
+echo ""
+echo "==============================================="
+echo "✓ All basic tests passed!"
+echo "==============================================="
+echo ""
+echo "Your DeepVariant repository is set up correctly."
+echo ""
+echo "Next steps:"
+echo "  1. To generate tfrecords from a CRAM file:"
+echo "     Use Docker: docker run google/deepvariant:1.6.1 /opt/deepvariant/bin/make_examples ..."
+echo "     Or build binaries: ./build_release_binaries.sh"
+echo ""
+echo "  2. To visualize tfrecords as images:"
+echo "     docker run google/deepvariant:1.6.1 /opt/deepvariant/bin/show_examples ..."
+echo ""

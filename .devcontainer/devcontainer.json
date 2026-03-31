@@ -1,0 +1,52 @@
+// For format details, see https://aka.ms/devcontainer.json. For config options, see the
+// README at: https://github.com/devcontainers/templates/tree/main/src/docker-existing-dockerfile
+{
+	"name": "Local development",
+	"gpu": "off",
+	"build": {
+		"context": "..",
+		"dockerfile": "../Dockerfile",
+		"target": "dev"
+	},
+	"runArgs": [
+		"--init",
+		"--network=host"
+	],
+	"mounts": ["source=/proj,target=/proj,type=bind,consistency=cached"],
+	"features": {
+		// "ghcr.io/devcontainers/features/common-utils:2": {}
+		// "configureZshAsDefaultShell": "true"
+		"ghcr.io/nils-geistmann/devcontainers-features/zsh:0": {
+			"plugins": "git"
+		}
+		// "ghcr.io/devcontainers/features/github-cli:1": {},
+		// "ghcr.io/devcontainers/features/aws-cli:1": {}
+		// "ghcr.io/devcontainers/features/sshd:1": {}
+	},
+	// Uncomment the next line to run commands after the container is created.
+	"postCreateCommand": {
+		// "zsh": "cp .devcontainer/zsh/* /home/pyphot/.oh-my-zsh/custom/"
+	},
+	// Configure tool-specific properties.
+	"securityOpt": [
+		"seccomp=unconfined"
+	],
+	"customizations": {
+		// Configure properties specific to VS Code.
+		"vscode": {
+			// Add the IDs of extensions you want installed when the container is created.
+			"extensions": [
+				"ms-vscode.cpptools",
+				"ms-vscode.cpptools-extension-pack",
+				"ms-vscode.cmake-tools",
+				"ms-vscode.makefile-tools",
+				"ms-azuretools.vscode-docker",
+				"ms-python.python",
+				"llvm-vs-code-extensions.vscode-clangd",
+				"eamodio.gitlens" // For inline git annotations
+			]
+		}
+	}
+	// Uncomment to connect as an existing user other than the container default. More info: https://aka.ms/dev-containers-non-root.
+	// "remoteUser": "devcontainer"
+}
