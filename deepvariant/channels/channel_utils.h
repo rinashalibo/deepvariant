@@ -51,11 +51,8 @@ constexpr float kMaxQScore = 93.0;
 // Quality channels should match haplotype image scaling (0-254).
 constexpr float kMaxQualityPixelValueAsFloat = 254.0;
 
-// Converts a base quality score to a color value using kMaxQScore (93).
-std::uint8_t BaseQualityColor(int base_qual);
-
 // Converts a quality score to a color value with a custom max quality.
-// Used for homopolymer quality scaling where max_quality is typically 40.
+// Used for ug homopolymer quality scaling where max_quality is typically 40.
 std::uint8_t BaseQualityColor(int base_qual, int max_quality);
 
 }  // namespace internal

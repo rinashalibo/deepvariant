@@ -40,16 +40,10 @@ namespace deepvariant {
 namespace channels {
 namespace internal {
 
-std::uint8_t BaseQualityColor(int base_qual) {
-  return static_cast<std::uint8_t>(kMaxQualityPixelValueAsFloat * base_qual /
-                                   kMaxQScore);
-}
-
 std::uint8_t BaseQualityColor(int base_qual, int max_quality) {
   // Clamp to max_quality
   int capped_qual = std::min(base_qual, max_quality);
-  return static_cast<std::uint8_t>(kMaxQualityPixelValueAsFloat * capped_qual /
-                                   max_quality);
+  return static_cast<std::uint8_t>(capped_qual * kMaxQualityPixelValueAsFloat / max_quality);
 }
 
 }  // namespace internal

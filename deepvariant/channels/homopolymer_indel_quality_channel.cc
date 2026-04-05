@@ -82,42 +82,9 @@ std::vector<int8_t> HomopolymerInDelQualityChannel::GetTPValues(
     return int_tps;
   }
 
-  // Decode TP values directly into int_tps.
-  // TrimRead() trims the tp info tag to match aligned_sequence(), so
-  // tp.size() == aligned_sequence.size() after trimming — no offset needed.
-  // For non-trimmed reads the same equality holds since tp and sequence are
-  // both full-read-length.
-  //
-  // TP may be encoded as a single string where each char stores a signed
-  // offset relative to 'A' (matching haplotype's SRead decoding path).
-  if (tps.size() == 1 &&
-      tps[0].kind_case() == nucleus::genomics::v1::Value::kStringValue &&
-      !tps[0].string_value().empty()) {
-    const std::string& encoded_tps = tps[0].string_value();
-    for (size_t i = 0; i < int_tps.size() && i < encoded_tps.size(); i++) {
-      int_tps[i] = static_cast<int8_t>(
-          static_cast<int>(static_cast<unsigned char>(encoded_tps[i])) -
-          static_cast<int>('A'));
-    }
-  } else {
-    for (size_t i = 0; i < int_tps.size() && i < tps.size(); i++) {
-      const nucleus::genomics::v1::Value& tp_value = tps[i];
-      if (tp_value.kind_case() == nucleus::genomics::v1::Value::kIntValue) {
-        int_tps[i] = static_cast<int8_t>(tp_value.int_value());
-      } else if (tp_value.kind_case() ==
-                 nucleus::genomics::v1::Value::kNumberValue) {
-        int_tps[i] = static_cast<int8_t>(tp_value.number_value());
-      } else if (tp_value.kind_case() ==
-                     nucleus::genomics::v1::Value::kStringValue &&
-                 !tp_value.string_value().empty()) {
-        int_tps[i] = static_cast<int8_t>(
-            static_cast<int>(
-                static_cast<unsigned char>(tp_value.string_value()[0])) -
-            static_cast<int>('A'));
-      }
-    }
+  for (int i = 0; i < tps.size() && i < int_tps.size(); i++) {
+    int_tps[i] = tps[i].int_value();
   }
-
   return int_tps;
 }
 
