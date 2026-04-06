@@ -135,7 +135,7 @@ HomopolymerInDelQualityChannel::HomoPolymerInDelQuality(const Read& read,
   const int quality_cap = options_.base_quality_cap();
   std::vector<std::uint8_t> hmer_directed_qualities(
       read.aligned_sequence().size(),
-      channels::internal::BaseQualityColor(quality_cap, quality_cap));
+      channels::internal::MaxQualityColor(quality_cap));
 
   std::string seq(read.aligned_sequence());
   auto hmer_lengths = HomoPolymerWeighted(read);
@@ -154,34 +154,29 @@ HomopolymerInDelQualityChannel::HomoPolymerInDelQuality(const Read& read,
     // Iterate quality encodings for hmer [i], and sum them up to upward
     // direction or downward direction quality PHRED scores.
     for (int j = 0; j < hmer_length; j++) {
-      const int pos = i + j;
-      const int tp_value = tps[pos];
-      const int encoded_hmer_qual = read.aligned_quality()[pos];
-
-      if (tp_value == 0) {
+      if (tps[i + j] == 0) {
         continue;
       }
-
-      bool is_deletion_err = tp_value < 0;
+      bool is_deletion_err = tps[i + j] < 0;
       if (is_deletion_err == is_deletion) {
-        hmer_directed_error_prob +=
-            std::pow(10, (encoded_hmer_qual / -10.0));
+        std::uint8_t encoded_hmer_qual = read.aligned_quality()[i + j];
+        float error_prob = std::pow(10, (encoded_hmer_qual / -10.0));
+        hmer_directed_error_prob += error_prob;
       }
     }
 
     int hmer_directed_quality =
         hmer_directed_error_prob == 0
-            ? quality_cap
+            ? kMaxQScore
             : static_cast<int>(-10 * std::log10(hmer_directed_error_prob));
     // Clamp to valid range
-    if (hmer_directed_quality > quality_cap) {
-      hmer_directed_quality = quality_cap;
+    if (hmer_directed_quality > kMaxQScore) {
+      hmer_directed_quality = kMaxQScore;
     }
 
     for (int j = 0; j < hmer_length; j++) {
       hmer_directed_qualities[i + j] =
-          channels::internal::BaseQualityColor(hmer_directed_quality,
-                                               quality_cap);
+          channels::internal::BaseQualityColor(hmer_directed_quality);
     }
     i += hmer_length;
   }

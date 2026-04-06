@@ -31,6 +31,7 @@
 
 #include "deepvariant/channels/homopolymer_insertion_quality_channel.h"
 
+#include <string>
 #include <vector>
 
 #include "deepvariant/channels/channel.h"
@@ -54,10 +55,8 @@ void HomopolymerInsertionQualityChannel::FillReadBase(
     homopolymer_insertion_quality_vector_ =
         HomoPolymerInDelQuality(read, false);  // false = insertion
   }
-
-  bool is_valid_index = (read_index >= 0 && 
-                        read_index < homopolymer_insertion_quality_vector_->size());
-  if (is_valid_index) {
+  if (read_index >= 0 &&
+      read_index < homopolymer_insertion_quality_vector_->size()) {
     data[col] = (*homopolymer_insertion_quality_vector_)[read_index];
   } else {
     data[col] = 0;

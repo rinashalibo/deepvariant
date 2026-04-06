@@ -31,6 +31,7 @@
 
 #include "deepvariant/channels/homopolymer_deletion_quality_channel.h"
 
+#include <string>
 #include <vector>
 
 #include "deepvariant/channels/channel.h"
@@ -54,10 +55,8 @@ void HomopolymerDeletionQualityChannel::FillReadBase(
     homopolymer_deletion_quality_vector_ =
         HomoPolymerInDelQuality(read, true);  // true = deletion
   }
-  
-  bool is_valid_index = (read_index >= 0 && 
-                        read_index < homopolymer_deletion_quality_vector_->size());
-  if (is_valid_index) {
+  if (read_index >= 0 &&
+      read_index < homopolymer_deletion_quality_vector_->size()) {
     data[col] = (*homopolymer_deletion_quality_vector_)[read_index];
   } else {
     data[col] = 0;

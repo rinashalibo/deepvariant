@@ -55,6 +55,10 @@ constexpr float kMaxQualityPixelValueAsFloat = 254.0;
 // Used for ug homopolymer quality scaling where max_quality is typically 40.
 std::uint8_t BaseQualityColor(int base_qual, int max_quality);
 
+// Convenience helper for the maximum encoded quality color for a given cap.
+// Equivalent to BaseQualityColor(max_quality, max_quality).
+std::uint8_t MaxQualityColor(int max_quality);
+
 }  // namespace internal
 }  // namespace channels
 }  // namespace deepvariant

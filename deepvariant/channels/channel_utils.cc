@@ -46,6 +46,10 @@ std::uint8_t BaseQualityColor(int base_qual, int max_quality) {
   return static_cast<std::uint8_t>(capped_qual * kMaxQualityPixelValueAsFloat / max_quality);
 }
 
+std::uint8_t MaxQualityColor(int max_quality) {
+  return BaseQualityColor(max_quality, max_quality);
+}
+
 }  // namespace internal
 }  // namespace channels
 }  // namespace deepvariant
