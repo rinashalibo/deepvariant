@@ -103,7 +103,7 @@ ENV DV_BIN_PATH=/opt/deepvariant/bin
 # Install libraries
 RUN apt-get -y update && \
   apt-get install -y parallel python3-pip unzip && \
-  PATH="${HOME}/.local/bin:$PATH" python3 -m pip install absl-py==0.13.0 && \
+  PATH="${HOME}/.local/bin:$PATH" python3 -m pip install absl-py==0.13.0 packaging && \
   apt-get clean autoclean && \
   apt-get autoremove -y --purge && \
   rm -rf /var/lib/apt/lists/*
